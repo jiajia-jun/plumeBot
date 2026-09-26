@@ -13,7 +13,7 @@ PlumeBot 是基于 OneBot v11 协议的 QQ「赛博群友」，对接 NapCat，�
 | [快速开始](zh/quickstart.md) | 环境要求、启动 NapCat、配置模型、编译运行、验证与故障排查 |
 | [配置参考](zh/configuration.md) | `config.yaml` 全字段说明（bot / onebot / control / middleware / llm / tools / agent / admin）与环境变量覆盖 |
 | [功能指南](zh/features.md) | 消息管线、三级记忆、触发控制、人格、多模态、群管理、日志与运维 |
-| [插件开发指南](zh/plugin-dev.md) | 用 plugin-sdk 编写独立第三方插件：最小示例、协议、部署、调试 |
+| [插件开发指南](zh/plugin-dev.md) | 用 plumebot-sdk 编写独立第三方插件：最小示例、协议、部署、调试 |
 | [管理后端指南](zh/admin.md) | Web 控制台使用 + 完整 HTTP API 参考 + 配置生效语义 |
 
 ## 内部设计
@@ -39,7 +39,7 @@ PlumeBot is an AI-driven QQ "cyber community member" built on the OneBot v11 pro
 | [Quick Start](en/quickstart.md) | prerequisites, starting NapCat, configuring a model, building & running, verification & troubleshooting |
 | [Configuration](en/configuration.md) | every `config.yaml` field (bot / onebot / control / middleware / llm / tools / agent / admin) and environment overrides |
 | [Features Guide](en/features.md) | message pipeline, three-tier memory, trigger control, persona, multi-modal, group management, logging & ops |
-| [Plugin Development](en/plugin-dev.md) | writing standalone plugins with the plugin-sdk: minimal example, protocol, deploy, debugging |
+| [Plugin Development](en/plugin-dev.md) | writing standalone plugins with the plumebot-sdk: minimal example, protocol, deploy, debugging |
 | [Admin Backend](en/admin.md) | web console usage + full HTTP API reference + how changes take effect |
 | [Contributing](../CONTRIBUTING.md) | issue/PR workflow, AI-assisted standards, commit guidelines, layer rules, testing |
 

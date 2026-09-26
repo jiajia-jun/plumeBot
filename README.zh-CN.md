@@ -30,7 +30,7 @@ Go 语言实现，单二进制部署，纯 Go 无 cgo——除 NapCat 外无任�
 
 ```bash
 # 1. 启动 NapCat（QQ 登录端），扫描日志中的二维码
-echo "PLUMEBOT_SELFID=<你的QQ号>" >> .env      # .env 已被 gitignore，不会入库
+cp .env.example .env                                  # 编辑 PLUMEBOT_SELFID 与 WEBUI_TOKEN
 docker compose up -d && docker compose logs -f napcat
 
 # 2. 首次运行会自动生成 config.yaml——填入模型 API Key

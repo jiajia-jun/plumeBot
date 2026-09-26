@@ -18,9 +18,9 @@ PlumeBot 是下在 OneBot v11 协议上的 QQ「赛博群友」，对接 [NapCat
 NapCat 负责 QQ 登录与 OneBot 消息收发，用 docker-compose 启动：
 
 ```bash
-# 在项目根目录创建 .env（已被 .gitignore 忽略，不会入库），填入 QQ 号
-echo "PLUMEBOT_SELFID=<你的QQ号>" >> .env
-echo "WEBUI_TOKEN=<随便一个管理台密码>" >> .env
+# 复制模板为 .env（.env 已被 .gitignore 忽略，不会入库），填入你的 QQ 号与 WebUI 密码
+cp .env.example .env
+# 编辑 .env：PLUMEBOT_SELFID=<你的QQ号>、WEBUI_TOKEN=<管理台密码>
 
 docker compose up -d
 docker compose logs -f napcat   # 首启看日志里的二维码，用手机 QQ 扫码

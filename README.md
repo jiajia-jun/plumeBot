@@ -30,7 +30,7 @@ Requires Docker (for NapCat), a QQ account and an OpenAI-compatible LLM endpoint
 
 ```bash
 # 1. Start NapCat (QQ login); scan the QR code shown in the log
-echo "PLUMEBOT_SELFID=<your QQ number>" >> .env      # .env is gitignored
+cp .env.example .env                                  # edit: PLUMEBOT_SELFID, WEBUI_TOKEN
 docker compose up -d && docker compose logs -f napcat
 
 # 2. First run generates config.yaml — fill in your model API key

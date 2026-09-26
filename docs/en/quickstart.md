@@ -18,9 +18,9 @@ PlumeBot is an AI-driven QQ "cyber community member" built on the OneBot v11 pro
 NapCat handles QQ login and OneBot messaging. Start it with docker-compose:
 
 ```bash
-# Create a .env file in the repo root (gitignored; never committed) with your QQ number
-echo "PLUMEBOT_SELFID=<your QQ number>" >> .env
-echo "WEBUI_TOKEN=<pick a password for the NapCat web UI>" >> .env
+# Copy the template to .env (gitignored; never committed) and fill in
+# PLUMEBOT_SELFID (your QQ number) and WEBUI_TOKEN (a password for the NapCat web UI)
+cp .env.example .env
 
 docker compose up -d
 docker compose logs -f napcat   # first start: scan the QR code shown in the log with your phone QQ
