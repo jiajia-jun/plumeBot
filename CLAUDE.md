@@ -24,7 +24,7 @@ go build ./...
 # 静态分析
 go vet ./...
 
-# 测试（已有多包单测：service/event、service/memory、service/agent、service/control、service/plugin、service/admin、service/log、infra/onebot、infra/ai、infra/ai/tools、infra/imagecache、infra/sqlite、infra/logfile、handler/web、pkg/config、pkg/jwt、pkg/logger、pkg/ahocorasick、pkg/base64util、plugin-sdk（独立 module：entity + plugin））
+# 测试（已有多包单测：service/event、service/memory、service/agent、service/control、service/plugin、service/admin、service/log、infra/onebot、infra/ai、infra/ai/tools、infra/imagecache、infra/sqlite、infra/logfile、handler/web、pkg/config、pkg/jwt、pkg/logger、pkg/ahocorasick、pkg/base64util；插件 SDK 为远程 module（github.com/plumebot/plumebot-sdk，其单测在 SDK 仓库））
 go test ./...
 
 # 运行（连接 NapCat，需先配置 config.yaml 的 onebot.ws_url；缺失配置会自动写入默认模板）
@@ -102,9 +102,9 @@ persona 重构为 agent 绑定人格模板，见架构 §7）。
 经 Instruction 注入；默认 agent 无模板则 seed 一条默认模板固化当前生效人设；组装在 main 侧，infra/ai 零改动，
 见架构 §7。注：Instruction 注入已由 P6-001 修订为 service 组装注入 system 消息，见 §5.6）。
 已完成：P4-002 插件系统（go-plugin 子进程 + 指令集协议：entity.PluginRequest/PluginResult{Reply, Actions}，
-plugin-sdk（独立 module，P6-004 抽取）做 go-plugin net/rpc 接线（手写 shim，免 protoc），host 侧 service/plugin 发现路由（plugin.json）+ 命令分发分支；
+插件 SDK（远程 module `github.com/plumebot/plumebot-sdk`，P6-004 抽取）做 go-plugin net/rpc 接线（手写 shim，免 protoc），host 侧 service/plugin 发现路由（plugin.json）+ 命令分发分支；
 只定义协议 + 宿主校验（ValidatePluginResult），不执行回复/动作，见架构 §8.6 与 B-017；回复发送已由 P6-002 落地（B-017），群管理动作已由 B-015 落地（插件 Actions 与 AI 工具共用 domain.GroupManager 执行路径，见下方完成记录与架构 §15）。
-已完成：P6-004 插件 SDK 抽取（协议 wire 类型 + go-plugin 接线迁至 plugin-sdk/entity + plugin-sdk/plugin，宿主 internal/domain/entity 协议类型改类型别名 + ValidatePluginResult 转发，删除 infra/plugin_exe；cmd/bot 直接用 SDK NewClient；示例插件只依赖 SDK，第三方可独立编写插件）。
+已完成：P6-004 插件 SDK 抽取（协议 wire 类型 + go-plugin 接线迁至远程 module plumebot-sdk/entity + plumebot-sdk/plugin（v0.1.0），宿主 internal/domain/entity 协议类型改类型别名 + ValidatePluginResult 转发，删除 infra/plugin_exe；cmd/bot 直接用 SDK NewClient；示例插件只依赖 SDK，第三方可独立编写插件）。
 已完成：第四阶段（人格与插件）全部完结，进入第六阶段。
 已完成：P5-001 触发模式（mention/auto 双模式，per-group group_config 表可独立配置；
 domain.Control 两方法 ShouldReply→Decision + OnReplied；service/control 模式判定 + event tail
@@ -248,7 +248,6 @@ plumebot/
 │       ├── sqlite/                 #   SQLite 存储实现（已接入：P2-001，8 张表 + migrations；member_profile/plugin_config 已移除，persona 为 agent 绑定人格模板）
 │       │   └── migrations/        #     DDL 迁移文件（001 单文件，migrate 全量执行）
 │       └── logfile/                #   日志文件读取（P7-002：domain.LogReader 实现，纯标准库读 zap JSON 日志 + 滚动备份，目录经构造注入）
-├── plugin-sdk/                     #   独立 SDK module（P6-004）：entity 协议 wire 类型 + plugin go-plugin 接线（宿主 replace 本地）
 ├── pkg/                            # 可复用工具
 │   ├── config/                     #   配置加载（嵌入默认模板 config.default.yaml）
 │   ├── logger/                     #   全局 zap 日志（另提供 Context/From 的 ctx 注入派生 logger = trace_id 机制，见架构 §17.6）
@@ -344,7 +343,7 @@ domain 零依赖
 - **agent 三要素配置化，多 agent 平滑演进**（P2-004）：`agent.name/description`（空值兜底 `config.DefaultAgentName/DefaultAgentDescription`）；`system_prompt` 空值时由组装器兜底 `defaultPersona`（`config.agent.system_prompt`）→ `DefaultSystemPrompt`（见上条）；`agent.name` 是 adk 元数据标识（multi-agent 路由），与 `bot.name`（QQ 展示名）语义独立不耦合；未来多 agent 演进为 `agents.list[]` + `active` 选择（每项一份三要素，LLM 保持全局 provider 注册中心），本期不实现。
 - **模板不替代 memory**（P2-004 评审）：eino ChatTemplate/StateModifier **不引入**（service 层不能 import infra 类型；组装逻辑不进 infra）；memory 存结构化数据不做渲染（同一数据源多渲染目标）；prompt 组装在 service 层（P6-001 完整五段），摘要压缩 prompt 归 service/memory（P3-003）。
 - **窗口/状态按会话分锁，跨会话互不阻塞**（P6-001 审查定案）：`Window`（service/memory）与 `ControlService`（service/control）对**同一会话**的读-改写以 per-session 锁串行化（`sync.Map` 注册表 + 每会话 `sync.Mutex`），**不同群/私聊互不阻塞**、跨会话天然并行（持锁绝不含 LLM/IO）。**同会话组装/压缩并发竞态已由 B-040 定案解决**（P6-002）：`GetWindow` 深拷贝 Parts（组装/压缩各持独立快照，无逃逸数组竞态）+ `Window.BackfillParts` 在窗口锁内安全回填图片描述——无跨 LLM 持锁（同会话组装与压缩互不阻塞）、常规路径零冗余落库（跳过条件 `Description!=""` 靠回填喂，见 roadmap P6-002）。
-- **插件形态 = 子进程 stdio，.so 废弃，go-plugin 定案**（P4-002 前置定案）：Go `plugin` 包（`-buildmode=plugin` / `plugin.Open()`）仅支持 Linux/FreeBSD/macOS——Windows 开发机不可用、禁交叉编译；且无卸载 API（非真热，只能热添加）、与主程序同进程（panic 拖垮整个 bot）、插件需与主程序完全同版本编译。插件统一为**独立进程 + stdio 通信**（HashiCorp go-plugin，net/rpc 变体，免 protoc）：跨平台、进程隔离、真热重载（重启子进程）。插件遵循**指令集协议**（§8.6）——`entity.PluginRequest{Command, Args, Session}` → `entity.PluginResult{Reply, Actions}`，插件零权限只声明意图、宿主唯一执行者；`domain.Plugin` 签名为 `Execute(ctx, entity.PluginRequest) (entity.PluginResult, error)`。**回复执行已由 P6-002 落地**（校验通过后经 B-003 Sender 发送 `Reply`）；群管理动作执行已由 B-015 落地（dispatchCommand → executeActions 经 `domain.GroupManager` 执行，与 AI 工具共用执行路径，见 §15 决策）。**协议与接线抽为独立 SDK module（P6-004）**：`plugin-sdk/entity`（wire 类型）+ `plugin-sdk/plugin`（`Serve`/`NewClient`），宿主 `internal/domain/entity` 协议类型改类型别名、`ValidatePluginResult` 转发，`cmd/bot` 直接用 SDK `NewClient`；第三方插件只依赖 plugin-sdk 即可独立编写（不 import 宿主 internal），gob 类型名因同 module 路径保持一致。
+- **插件形态 = 子进程 stdio，.so 废弃，go-plugin 定案**（P4-002 前置定案）：Go `plugin` 包（`-buildmode=plugin` / `plugin.Open()`）仅支持 Linux/FreeBSD/macOS——Windows 开发机不可用、禁交叉编译；且无卸载 API（非真热，只能热添加）、与主程序同进程（panic 拖垮整个 bot）、插件需与主程序完全同版本编译。插件统一为**独立进程 + stdio 通信**（HashiCorp go-plugin，net/rpc 变体，免 protoc）：跨平台、进程隔离、真热重载（重启子进程）。插件遵循**指令集协议**（§8.6）——`entity.PluginRequest{Command, Args, Session}` → `entity.PluginResult{Reply, Actions}`，插件零权限只声明意图、宿主唯一执行者；`domain.Plugin` 签名为 `Execute(ctx, entity.PluginRequest) (entity.PluginResult, error)`。**回复执行已由 P6-002 落地**（校验通过后经 B-003 Sender 发送 `Reply`）；群管理动作执行已由 B-015 落地（dispatchCommand → executeActions 经 `domain.GroupManager` 执行，与 AI 工具共用执行路径，见 §15 决策）。**协议与接线抽为独立 SDK module（P6-004，远程 `github.com/plumebot/plumebot-sdk`）**：`plumebot-sdk/entity`（wire 类型）+ `plumebot-sdk/plugin`（`Serve`/`NewClient`），宿主 `internal/domain/entity` 协议类型改类型别名、`ValidatePluginResult` 转发，`cmd/bot` 直接用 SDK `NewClient`；第三方插件只依赖该 module 即可独立编写（不 import 宿主 internal），gob 类型名因同 module 路径保持一致。
 - **群管理执行器 = per-event ctx 注入，护栏集中在 GroupManager.Execute，工具/插件共用单一执行路径**（B-015 定案，架构 §15）：`domain.GroupManager` 仅一个方法 `Execute(ctx, entity.GroupAction) error`（统一入口，AI 工具与插件 Actions 走同一护栏链，护栏不重复、不旁路）；onebot 层 matcher 闭包构造 per-event `botGroupManager`（持 `*zero.Ctx` + `domain.Storage` + botID）经 `WithGroupManager` 注入 ctx，与 Session/Sender 同构（工具为共享单例，经 `GroupManagerFrom(ctx)` 取执行器）。三道护栏集中在 `Execute`：① per-group 开关 `group_config.group_mgmt_enabled`（002 迁移，默认 1 开；`GetGroupConfig` 无配置行 = 默认开，0 = 显式关闭）；② 触发者与 bot 都须为群主/管理员（`get_group_member_info` 查 role，查询失败/无 role 一律拒绝，fail-closed）；③ mute 时长钳制 30 天（超限平台拒绝）。动作经 `ctx.CallAction` 检查 `APIResponse.Status/RetCode` 反馈成功与否——`SetGroupBan/SetGroupKick/SetGroupCard` 封装吞掉响应（void），动作失败无法反馈，高危能力静默失败不可接受。
 - **SQLite 迁移 = 版本记录式（B-015 起，B-034 基础设施顺带建立）**：`migrate()` 建 `schema_migrations` 表（version PK + applied_at），每迁移文件在**单事务内**执行并记录，失败整体回滚不记版本（下次启动重试，避免「ALTER 成功但未记录 → 重启 duplicate column」）；旧库 001 重放靠 IF NOT EXISTS 幂等。001 不再改动，新增列一律新建 `00N_*.sql`（SQLite 无 `ADD COLUMN IF NOT EXISTS`，幂等依赖版本记录）。B-034 完整任务（校验等）仍后置。
 - **管理后端契约分层 = 接口在 domain / 通信结构体在 entity / json 归 web dto**（P7 层引用合规定案）：`domain.Admin` 接口（方法签名以 entity 承载）+ 消费侧接口 `domain.SessionWindowReader`/`domain.GroupProfileInvalidator`/`domain.SessionSummaryReader` 全部定义在 domain 层，`service/admin.Service` 实现接口，`handler/web` 依赖 `domain.Admin` 而非具体类型（与其他 service → `domain.Control`/`domain.Memory`/`domain.LogReader` 一致）；通信/出参结构体（`entity.AuthResult`/`entity.SessionOverview`/`entity.SessionMessage`/`entity.SessionSummary`）入 `domain/entity` 保持纯结构（不带 json tag，同 `entity.LogQuery` 先例）；HTTP 入参/出参的 json 序列化由 `handler/web/dto`（request/response）独家接管——entity 不背 json 责任，handler 在 web 边界做 entity↔dto 转换。
@@ -408,7 +407,7 @@ domain 零依赖
 - `sqlite/`：已接入（P2-001，8 张表 + migrations；member_profile/plugin_config 已移除，persona 为 agent 绑定人格模板）。
 - `ai/`：已接入（P2-004：Registry provider 注册中心 + openai 兼容工厂 + EinoAgent + 多模态转换，正式单测全绿；P3-004：`ai/tools` 记忆更新工具 store_fact/learn_jargon/forget_fact，会话身份经 `entity.Session` 注入 ctx）。
 - `logfile/`：已接入（P7-002：`domain.LogReader` 实现，纯标准库读 `~/.plumebot/logs` 下的 zap JSON 日志与 lumberjack 滚动备份，支持等级 × 时间段 × trace_id + 分页；gin.log 文本不纳入，见架构 §17.6）。
-- `plugin-sdk/`（根目录，独立 module，P6-004）：插件协议 wire 类型（`plugin-sdk/entity`）+ go-plugin net/rpc 接线（`plugin-sdk/plugin`：插件侧 `Serve` + 宿主侧 `NewClient`，宿主侧 `Client` 结构化满足 `domain.Plugin`）。宿主 `internal/domain/entity` 协议类型为 SDK 类型别名；第三方插件只依赖 SDK。
+- 插件 SDK（远程 module `github.com/plumebot/plumebot-sdk`，v0.1.0，非仓库子目录）：插件协议 wire 类型（`plumebot-sdk/entity`）+ go-plugin net/rpc 接线（`plumebot-sdk/plugin`：插件侧 `Serve` + 宿主侧 `NewClient`，宿主侧 `Client` 结构化满足 `domain.Plugin`）。宿主 `internal/domain/entity` 协议类型为 SDK 类型别名；第三方插件 require 该 module 即可独立编写。
 
 每个 infra 包必须：
 

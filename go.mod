@@ -2,8 +2,8 @@ module plumebot
 
 go 1.26.4
 
-// 插件 SDK：独立 module（协议 wire 类型 + go-plugin 接线，见 plumebot-sdk/），本地 replace。
-// 发布后去掉 replace 改为远程依赖。
+// 插件 SDK：独立 module（协议 wire 类型 + go-plugin 接线），当前以远程 module v0.1.0 直接依赖；
+// 本地调试 / 版本冻结可临时 replace 为本地目录。
 require github.com/plumebot/plumebot-sdk v0.1.0
 
 require (
