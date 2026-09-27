@@ -76,7 +76,7 @@ func main() { plugin.Serve(&hello{}) }
 
 ## 架构一览
 
-```
+```markdown
 NapCat (QQ 登录)
    │ OneBot WebSocket
    ▼
@@ -95,7 +95,7 @@ ZeroBot 连接层
                  Sender 发送 → 窗口追加 + OnReplied 记账
 ```
 
-```
+```markdown
 cmd ──→ handler ──→ service ──→ domain（接口）
                       │
                       └──→ infra（编译时注入）
@@ -107,7 +107,7 @@ domain 零依赖
 ## 技术栈
 
 | 组件 | 说明 |
-|------|------|
+| :------ | :------ |
 | Go 1.21+ | 单二进制，无外部服务依赖（除 NapCat） |
 | [ZeroBot](https://github.com/wdvxdr1123/ZeroBot) | OneBot v11 连接层 |
 | [eino](https://github.com/cloudwego/eino) (CloudWeGo) | AI Agent 引擎，ChatModelAgent + tool calling |
