@@ -10,4 +10,6 @@ type Summary struct {
 	Keywords  []string // 关键词标签（索引/召回用）
 	Decisions []string // 关键决定/共识
 	CreatedAt int64    // 生成时间（Unix 秒）
+	EventFrom *int64   // 覆盖对话的最早事件时间；nil = 旧摘要或无法确定
+	EventTo   *int64   // 覆盖对话的最晚事件时间；nil = 旧摘要或无法确定
 }

@@ -86,6 +86,35 @@ func main() {
 	if err := toolsRegistry.Register("forget_fact", memTools.ForgetFact()); err != nil {
 		logger.Fatal("注册 forget_fact 失败", logger.Err(err))
 	}
+
+	// 记忆召回始终注册，但仅在 recall_memory 已启用时启动后台索引器。
+	// embedding_model 留空时索引/查询仍可用 FTS 关键词，不发起外部向量请求。
+	recallEnabled := isToolEnabled(cfg.Tools.Enabled, "recall_memory")
+	var recallEmbedder domain.Embedder
+	if recallEnabled && cfg.LLM.EmbeddingModel != "" {
+		if entry, ok := cfg.LLM.EmbeddingEntry(); !ok {
+			logger.Warn("llm.embedding_model 未指向任何 models 条目，语义检索关闭（关键词检索仍可用）",
+				logger.S("embedding_model", cfg.LLM.EmbeddingModel))
+		} else if embedder, err := ai.NewOpenAIEmbedder(entry, cfg.LLM.TimeoutSeconds); err != nil {
+			logger.Warn("初始化 embedding 模型失败，语义检索关闭（关键词检索仍可用）", logger.Err(err))
+		} else {
+			recallEmbedder = embedder
+			logger.Info("记忆召回 embedding 已启用", logger.S("model", entry.Model))
+		}
+	}
+	recallSvc := memory.NewRecallService(storageInfra, recallEmbedder)
+	if err := toolsRegistry.Register("recall_memory", tools.NewRecallTool(recallSvc).Tool()); err != nil {
+		logger.Fatal("注册 recall_memory 失败", logger.Err(err))
+	}
+	if recallEnabled {
+		recallIndexer := memory.NewRecallIndexer(storageInfra, recallEmbedder)
+		recallIndexer.Start(ctx)
+		defer func() {
+			if err := recallIndexer.Close(); err != nil {
+				logger.Warn("关闭记忆召回索引器失败", logger.Err(err))
+			}
+		}()
+	}
 	// B-015 群管理动作工具：能力经 ctx 注入的 GroupManager 执行（per-event），
 	// 工具自身无依赖；护栏（per-group 开关 + 管理员校验）在 onebot 实现内集中把关，
 	// per-group 开关 group_config.group_mgmt_enabled 默认 1 开（0 = 显式关闭）。
@@ -249,7 +278,7 @@ func main() {
 
 	// 5.3 阻塞等待退出信号（Ctrl+C / SIGTERM），收到后优雅关闭：
 	// 先 http.Server.Shutdown 排空 web 在途请求，再 return 触发既有 defer 链
-	//（pluginSvc.Close → storageInfra.Close → logger.Sync；注册顺序保证 LIFO 正确，
+	//（pluginSvc.Close → recallIndexer.Close → storageInfra.Close → logger.Sync，注册顺序保证 LIFO 正确，
 	// 且 panic 路径同样有清理保障）。
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
@@ -262,7 +291,7 @@ func main() {
 			logger.Warn("web 服务优雅关闭超时/失败", logger.Err(err))
 		}
 	}
-	logger.Info("web 服务已关闭，清理剩余资源（插件 → 存储 → 日志）")
+	logger.Info("web 服务已关闭，清理剩余资源（插件 → 召回索引 → 存储 → 日志）")
 	// 恢复默认信号处理：关闭过程中再次 Ctrl+C 将直接终止进程（防卡死安全网）。
 	signal.Stop(quit)
 
@@ -363,6 +392,16 @@ func newWebServer(addr string) *http.Server {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
 	return &http.Server{Addr: addr, Handler: r}
+}
+
+// isToolEnabled 检查工具启用列表，重复项不影响判断。
+func isToolEnabled(enabled []string, name string) bool {
+	for _, item := range enabled {
+		if item == name {
+			return true
+		}
+	}
+	return false
 }
 
 // entryProvider 返回条目实际生效的 provider 名（与 Registry.NewAgent 的兜底一致）。

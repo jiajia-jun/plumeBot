@@ -45,7 +45,7 @@ type builderStorage struct {
 	updated    [][]entity.ContentPart
 }
 
-func (f *builderStorage) SaveMessage(_ context.Context, _ entity.Message) error { return nil }
+func (f *builderStorage) SaveMessage(_ context.Context, _ string, _ entity.Message) error { return nil }
 
 func (f *builderStorage) GetGroupProfile(_ context.Context, groupID string) (*entity.GroupProfile, error) {
 	if p, ok := f.groupProf[groupID]; ok {

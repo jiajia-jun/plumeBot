@@ -101,7 +101,7 @@ func TestOpenAIFactoryValidEnabledConstructs(t *testing.T) {
 }
 
 // TestDefaultConfigEnabledToolsCanBeRegistered 默认模板 tools.enabled 的每个名字都应能被 main.go
-// 注册（当前 7 个记忆/群管工具）。名字写错会在启动 fail-fast（bot 直接起不来），但此测试把
+// 注册（当前 8 个记忆/群管工具）。名字写错会在启动 fail-fast（bot 直接起不来），但此测试把
 // 「默认配置 ↔ 生产注册」的一致性作为不变量钉住，防止新增工具时漏掉双处同步。
 func TestDefaultConfigEnabledToolsCanBeRegistered(t *testing.T) {
 	cfg, err := config.Load(t.TempDir() + "/config.yaml")
@@ -110,7 +110,7 @@ func TestDefaultConfigEnabledToolsCanBeRegistered(t *testing.T) {
 	}
 	known := map[string]bool{
 		"store_fact": true, "learn_jargon": true, "forget_fact": true,
-		"group_mute": true, "group_unmute": true, "group_kick": true, "group_set_card": true,
+		"group_mute": true, "group_unmute": true, "group_kick": true, "group_set_card": true, "recall_memory": true,
 	}
 	if len(cfg.Tools.Enabled) == 0 {
 		t.Error("默认模板 tools.enabled 不应为空（空 = 模型请求不带任何 tool schema）")

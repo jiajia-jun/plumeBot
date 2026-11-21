@@ -81,6 +81,9 @@ func (c *Client) registerMatchers() {
 		// 消息日志统一由 service/event 日志中间件记录，这里不重复打 Info。
 		sendCtx := domain.WithSender(context.Background(), newSender(ctx))
 		sendCtx = domain.WithGroupManager(sendCtx, newGroupManager(ctx, c.store, c.botID))
+		if memberReader := newGroupMemberReader(ctx); memberReader != nil {
+			sendCtx = domain.WithGroupMemberReader(sendCtx, memberReader)
+		}
 		sendCtx = logger.Context(sendCtx, logger.S("trace_id", msgTraceID(msg)))
 		if err := c.msg.Handle(sendCtx, msg); err != nil {
 			if reply := decideReply(err); reply != "" {

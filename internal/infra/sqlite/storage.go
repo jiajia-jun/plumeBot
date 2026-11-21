@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite/vec"
 
 	"plumebot/internal/domain"
 	"plumebot/internal/domain/entity"
@@ -163,15 +164,15 @@ func (s *Storage) appliedMigrations(ctx context.Context) (map[string]bool, error
 // ──────────────────────────── messages ────────────────────────────
 
 // SaveMessage 保存一条聊天消息到 messages 表（Parts 序列化为 JSON）。
-func (s *Storage) SaveMessage(ctx context.Context, msg entity.Message) error {
+func (s *Storage) SaveMessage(ctx context.Context, sessionKey string, msg entity.Message) error {
 	_, err := s.db.ExecContext(ctx, sqlSaveMessage,
-		msg.MessageID, msg.GroupID, msg.UserID, marshalParts(msg.Parts), msg.Timestamp, msg.MessageType)
+		msg.MessageID, msg.GroupID, msg.UserID, marshalParts(msg.Parts), msg.Timestamp, msg.MessageType, sessionKey)
 	return err
 }
 
-// GetMessages 按群 ID 获取最近消息，按时间倒序，支持分页（limit/offset）。
-func (s *Storage) GetMessages(ctx context.Context, groupID string, limit, offset int) ([]entity.Message, error) {
-	rows, err := s.db.QueryContext(ctx, sqlGetMessages, groupID, limit, offset)
+// GetMessages 按会话键获取最近消息，按时间倒序，支持分页（limit/offset）。
+func (s *Storage) GetMessages(ctx context.Context, sessionKey string, limit, offset int) ([]entity.Message, error) {
+	rows, err := s.db.QueryContext(ctx, sqlGetMessages, sessionKey, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +218,7 @@ func (s *Storage) SaveSummary(ctx context.Context, sum entity.Summary) error {
 	keywords, _ := json.Marshal(sum.Keywords)
 	decisions, _ := json.Marshal(sum.Decisions)
 	_, err := s.db.ExecContext(ctx, sqlSaveSummary,
-		sum.ChatID, sum.Seq, sum.Text, string(keywords), string(decisions), sum.CreatedAt)
+		sum.ChatID, sum.Seq, sum.Text, string(keywords), string(decisions), sum.CreatedAt, sum.EventFrom, sum.EventTo)
 	return err
 }
 
@@ -234,7 +235,7 @@ func (s *Storage) ListSummaries(ctx context.Context, chatID string, limit int) (
 	for rows.Next() {
 		var sum entity.Summary
 		var keywords, decisions string
-		if err := rows.Scan(&sum.ChatID, &sum.Seq, &sum.Text, &keywords, &decisions, &sum.CreatedAt); err != nil {
+		if err := rows.Scan(&sum.ChatID, &sum.Seq, &sum.Text, &keywords, &decisions, &sum.CreatedAt, &sum.EventFrom, &sum.EventTo); err != nil {
 			return nil, err
 		}
 		json.Unmarshal([]byte(keywords), &sum.Keywords)

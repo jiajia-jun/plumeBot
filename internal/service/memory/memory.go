@@ -70,7 +70,7 @@ func (s *MemoryService) persist(ctx context.Context, sessionID string, msg entit
 	if err != nil {
 		return false, err
 	}
-	if err := s.store.SaveMessage(ctx, msg); err != nil {
+	if err := s.store.SaveMessage(ctx, sessionID, msg); err != nil {
 		return false, err
 	}
 	s.profiles.TouchMessage(ctx, msg)

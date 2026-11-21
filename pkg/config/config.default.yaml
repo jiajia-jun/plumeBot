@@ -52,6 +52,7 @@ llm:
     #   model: qwen-vl-plus
   chat_model: chat              # 对话模型条目引用；空 → models[0]
   vision_model: ""              # 图片描述模型条目引用；空 = 描述关闭
+  embedding_model: ""           # OpenAI 兼容 embedding 模型条目引用；空 = 关闭向量语义检索（只用关键词）
   prompt:                       # prompt 组装预算/上限（P6-001，架构 §6）
     facts_per_member: 3         # 窗口内每成员事实条数上限；≤0 → 3
     jargon_cap: 20              # confirmed 黑话条数上限；≤0 → 20
@@ -59,7 +60,9 @@ llm:
     describe_per_turn_cap: 10   # 每条消息图片描述条数上限；≤0 → 10
 
 tools:
-  enabled: [store_fact, learn_jargon, forget_fact, group_mute, group_unmute, group_kick, group_set_card]   # 启用的工具名列表（P3-004 记忆更新工具 + B-015 群管理工具）；空 = 不注册任何工具；per-group 开关 group_config.group_mgmt_enabled 默认 1 开（0 = 显式关闭，仍需管理员权限）
+  enabled: [store_fact, learn_jargon, forget_fact, group_mute, group_unmute, group_kick, group_set_card, recall_memory]   # 启用的工具列表；recall_memory 从 SQLite 召回同会话历史（启用外部 embedding 时历史文本会发往该服务）
+  max_output_chars: 2500       # 单次工具结果默认字符上限；中间件硬上限 4000
+  max_total_output_chars: 6000 # 单次 Agent 推理所有工具结果合计字符上限
 
 agent:
   name: PlumeBot              # agent 标识（adk 元数据，multi-agent 路由用）；空 → PlumeBot

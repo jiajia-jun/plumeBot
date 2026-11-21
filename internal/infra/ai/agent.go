@@ -33,8 +33,9 @@ var _ domain.Agent = (*EinoAgent)(nil)
 // 组装注入首条 system 消息（改 persona 表即时生效），本层只执行推理；工具按需注入。
 // model 为对话模型名（调用度量日志用，架构 §17.2 infra/ai），由 provider 工厂注入。
 type EinoAgent struct {
-	agent *adk.ChatModelAgent
-	model string
+	agent        *adk.ChatModelAgent
+	model        string
+	outputLimits ToolOutputLimitConfig
 }
 
 // NewEinoAgent 组装 eino ChatModelAgent。
@@ -44,8 +45,12 @@ type EinoAgent struct {
 // SystemPrompt 保留字段但 P6-001 起通常为空（人格由 service 组装注入，见 EinoAgent 注释；
 // 非空时仍会经 Instruction 前置，用于兜底/测试）；
 // tools 为空时不注入 ToolsConfig（空 ToolsNodeConfig 行为未验证，不冒险）；
-// MaxIterations 显式兜底 defaultMaxIterations。
-func NewEinoAgent(ctx context.Context, cm model.BaseChatModel, tools []tool.BaseTool, acfg config.AgentConfig) (*EinoAgent, error) {
+// MaxIterations 显式兜底 defaultMaxIterations。outputLimits 可选；未传时使用默认字符预算。
+func NewEinoAgent(ctx context.Context, cm model.BaseChatModel, tools []tool.BaseTool, acfg config.AgentConfig, outputLimits ...ToolOutputLimitConfig) (*EinoAgent, error) {
+	limits := ToolOutputLimitConfig{}
+	if len(outputLimits) > 0 {
+		limits = outputLimits[0]
+	}
 	cfg := &adk.ChatModelAgentConfig{
 		Name:          acfg.Name,
 		Description:   acfg.Description,
@@ -55,7 +60,10 @@ func NewEinoAgent(ctx context.Context, cm model.BaseChatModel, tools []tool.Base
 	}
 	if len(tools) > 0 {
 		cfg.ToolsConfig = adk.ToolsConfig{
-			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools},
+			ToolsNodeConfig: compose.ToolsNodeConfig{
+				Tools:               tools,
+				ToolCallMiddlewares: []compose.ToolMiddleware{NewToolOutputLimiter(limits)},
+			},
 		}
 	}
 
@@ -63,14 +71,14 @@ func NewEinoAgent(ctx context.Context, cm model.BaseChatModel, tools []tool.Base
 	if err != nil {
 		return nil, fmt.Errorf("组装 ChatModelAgent 失败: %w", err)
 	}
-	return &EinoAgent{agent: agent}, nil
+	return &EinoAgent{agent: agent, outputLimits: limits}, nil
 }
 
 // Generate 将业务消息转换为 eino 消息并执行推理，返回最终文本回复。
 // 事件迭代中第一个错误（含超时、tool 循环超限、工具执行失败）直接透传；
 // 无任何模型输出消息时报错；有输出但 Content 为空 → 返回空串（P6 再议）。
 // 每次调用记模型调用度量（架构 §17.2）：model、latency_ms、prompt/completion tokens
-//（eino ResponseMeta.Usage，模型实现未返回时缺省）；失败也记 Warn（排障 AI 回复有依据）。
+// （eino ResponseMeta.Usage，模型实现未返回时缺省）；失败也记 Warn（排障 AI 回复有依据）。
 func (e *EinoAgent) Generate(ctx context.Context, msgs []entity.ChatMessage) (string, error) {
 	// ctx 内派生 logger 携带 trace_id（会话键，架构 §17.6）：模型调用可在日志浏览页
 	// 与同会话的消息入口/结局行串联；未注入时 From 回退全局。
@@ -85,7 +93,8 @@ func (e *EinoAgent) Generate(ctx context.Context, msgs []entity.ChatMessage) (st
 		return "", err
 	}
 
-	iter := e.agent.Run(ctx, &adk.AgentInput{Messages: schemaMsgs, EnableStreaming: false})
+	runCtx := withToolOutputBudget(ctx, e.outputLimits)
+	iter := e.agent.Run(runCtx, &adk.AgentInput{Messages: schemaMsgs, EnableStreaming: false})
 
 	var last *schema.Message
 	for {

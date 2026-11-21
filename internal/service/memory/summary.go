@@ -64,7 +64,7 @@ func (s *SummaryStore) ensureLoaded(ctx context.Context, chatID string) {
 }
 
 // Append 追加一条一级压缩摘要到热链，分配会话内递增 seq，返回该摘要。
-func (s *SummaryStore) Append(ctx context.Context, chatID string, text string, keywords, decisions []string) entity.Summary {
+func (s *SummaryStore) Append(ctx context.Context, chatID string, text string, keywords, decisions []string, eventRange ...*int64) entity.Summary {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ensureLoaded(ctx, chatID)
@@ -77,6 +77,9 @@ func (s *SummaryStore) Append(ctx context.Context, chatID string, text string, k
 		Decisions: decisions,
 		CreatedAt: time.Now().Unix(),
 	}
+	if len(eventRange) >= 2 {
+		sum.EventFrom, sum.EventTo = eventRange[0], eventRange[1]
+	}
 	s.nextSeq[chatID]++
 	s.chains[chatID] = append(s.chains[chatID], sum)
 	return sum
@@ -84,7 +87,7 @@ func (s *SummaryStore) Append(ctx context.Context, chatID string, text string, k
 
 // ReplaceWithFused 把热链整体替换为一条二级融合摘要（全部→1）。
 // 被覆盖的旧摘要落库归档；返回新融合摘要。
-func (s *SummaryStore) ReplaceWithFused(ctx context.Context, chatID string, text string, keywords, decisions []string) entity.Summary {
+func (s *SummaryStore) ReplaceWithFused(ctx context.Context, chatID string, text string, keywords, decisions []string, eventRange ...*int64) entity.Summary {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ensureLoaded(ctx, chatID)
@@ -99,6 +102,9 @@ func (s *SummaryStore) ReplaceWithFused(ctx context.Context, chatID string, text
 		Keywords:  keywords,
 		Decisions: decisions,
 		CreatedAt: time.Now().Unix(),
+	}
+	if len(eventRange) >= 2 {
+		fused.EventFrom, fused.EventTo = eventRange[0], eventRange[1]
 	}
 	s.nextSeq[chatID]++
 	s.chains[chatID] = []entity.Summary{fused}

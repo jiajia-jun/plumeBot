@@ -23,7 +23,7 @@
 | 存储 | SQLite + modernc.org/sqlite | 纯 Go 驱动，无 cgo |
 | 日志 | uber/zap | 高性能结构化日志 |
 | 配置 | spf13/viper | YAML 配置文件（`config.yaml`）；仅敏感/机器字段支持环境变量覆盖（模型 api_key 经 `PLUMEBOT_APIKEY_<模型名大写>`、self_id 经 `PLUMEBOT_SELFID`，见 CLAUDE.md §6.6） |
-| 向量检索 | LLM API embedding（默认关闭） | 可选开启，调 LLM embedding 接口；关闭时走 SQLite 关键词+时间检索 |
+| 向量检索 | OpenAI 兼容 embedding（默认关闭） | `llm.embedding_model` 引用 `llm.models[].name`；关闭时本地 SQLite FTS/短词子串检索，启用时追加 SQLite BLOB cosine 精确排序，详见 §4.5 |
 | 插件 | 子进程 stdio（HashiCorp go-plugin，net/rpc 变体） | 原 .so 方案因 Windows 不可用废弃；插件按自定义指令集协议返回结构化结果（见 §8.6） |
 | 测试 | Go 标准库 testing | 零额外依赖 |
 
@@ -123,6 +123,17 @@ Agent 通过 eino Tool 机制驱动记忆更新，在对话中自行判断何时
 
 事实冲突直接覆盖。具体 Tool 实现时再定。
 
+### 4.5 历史消息召回（检索式长期记忆）
+
+`recall_memory` 是 Agent 可主动调用的只读工具，用于在窗口压缩/摘要融合后按内容查找长期历史。它不改变现有 prompt 自动注入策略，也不删除 `messages` 或 `conversation_summary` 原始数据。
+
+- **检索内容与排序**：原始消息与归档摘要进入同一套检索文档，关键词和语义候选经 RRF 融合、去重，再按工具参数限制候选与返回片段数；工具结果不标注原文/摘要优先级，返回内容被视为历史证据而非系统指令。SQLite FTS5 trigram 承担关键词检索，1–2 字查询使用授权会话范围内的子串检索；可选 embedding 向量保存在 SQLite BLOB，通过 `vec_distance_cosine` 精确扫描排序（不是 ANN/近似近邻索引）。文档按源版本更新，旧派生索引不匹配当前源版本时不会返回。
+- **依赖边界**：`infra/ai/tools.RecallTool → domain.MemoryRecaller ← service/memory.RecallService`；service 只依赖 `domain.RecallStore` / `domain.Embedder` / per-event `domain.GroupMemberReader`，由 `cmd/bot` 组装。`infra/ai`、`infra/sqlite`、`infra/onebot` 互不依赖。SQLite FTS/向量是可重建派生表；源版本、事件时间与摘要/消息正文保留在原表。
+- **访问范围**：私聊只允许当前用户的 `private:<user_id>`；群聊允许当前群，以及**本次查询时 OneBot 成员列表中的当前群成员私聊会话**。成员列表通过 `get_group_member_list(no_cache=true)` 每次查询获取；查询失败/成员返回不完整时 fail-closed 到本群，并将结果标为部分覆盖，绝不扩大到全库。该默认行为意味着群里可能复述成员与 bot 的私聊内容，是产品隐私边界；此默认已由用户明确选择。成员在列表快照之后退出/加入群，查询无法与平台列表变更做事务级一致。
+- **外部 embedding 与隐私/费用**：默认 `llm.embedding_model: ""`，此时只做本地关键词检索，不发送 embedding 请求。若填写已有 `llm.models[].name`，且 `recall_memory` 已启用，后台会批量向该 OpenAI 兼容 embedding endpoint 发送所有可可靠归属的历史原文、摘要，以及之后新增/更新的内容；每次语义查询也会发送 query。数据包括私聊历史，可能产生费用并适用该服务商的数据处理政策。清空 `embedding_model` 后停止向量请求；禁用 `recall_memory` 后不启动索引 worker。已有 `config.yaml` 不会在启动时自动与默认模板合并：升级后需手动将 `recall_memory` 加入 `tools.enabled`；启用语义检索时，还需在 `llm.models` 配置 OpenAI 兼容模型条目，并将 `llm.embedding_model` 设为该条目的 `name`，空值则继续使用纯关键词召回。密钥、query 正文和 API 响应正文不得写入日志。模型 endpoint/name 变化会隔离新向量空间并补建；向量维数变化会被识别并触发重建，同一 endpoint/model 背后的权重静默替换无法自动识别，需使用新模型标识或手动重建派生向量。
+- **会话与时间边界**：004 迁移为 `messages` 增加显式 `session_key`，新消息（包括私聊 bot 回复）按触发会话落库；旧群消息与可确认的私聊入站消息回填。无法可靠归属的旧私聊 `self:` bot 回复保持空 session，不猜测用户且不进入私聊召回；这部分历史无法由现有行恢复归属。摘要事件时间与 `created_at`（摘要生成时间）分开保存；旧摘要事件时间未知。带时间查询只返回事件范围完整落在边界内的内容，对未知时间与跨界摘要标记部分覆盖，不把生成时间冒充对话时间。
+- **统一工具输出上限**：Eino `ToolMiddleware` 覆盖普通/流式/增强工具；每次工具调用默认最多 2500 字符（配置 `tools.max_output_chars`，硬上限 4000），单轮 Agent 工具结果累计默认 6000 字符（`tools.max_total_output_chars`）。并行调用原子预留预算；不足以容纳提示时跳过可能有副作用的工具，完全放不下提示则终止本轮。JSON 截断保持合法包络。字符预算不是 token 预算，不能单独保证完整 prompt 未超过模型上下文。
+
 ---
 
 ## 5. 窗口压缩策略
@@ -151,7 +162,7 @@ Agent 通过 eino Tool 机制驱动记忆更新，在对话中自行判断何时
 
 - 热链存内存：当前参与对话的最新摘要，参与二级融合与 FIFO 淘汰，直接拼入 prompt（§5.4）。
 - 长程归档存 SQLite（`conversation_summary` 表）：被融合覆盖 / 被淘汰的摘要落库，
-  重启后按会话回灌最新若干条作热链底；其余长程历史保留在库中（带 keywords 索引，供后续检索召回，见 §4.1）。
+  重启后按会话回灌最新若干条作热链底；其余长程历史保留在库中，由 §4.5 的后台索引器维护可重建词法/向量索引。
 
 ---
 
@@ -407,7 +418,7 @@ Agent 上下文窗口仅保留消息事件，通知/请求/元事件不污染对
 
 | 表 | 说明 |
 |----|------|
-| messages | 全量群聊消息存储，按 chat_id+时间索引，供关键词检索（后续可扩展向量检索） |
+| messages | 全量群/私聊消息，按显式 `session_key` + 时间索引；私聊 bot 回复落入触发者会话，无法确认归属的旧私聊回复不参与私聊召回 |
 | conversation_summary | 归档摘要（会话键 chat_id + seq 唯一，重启回灌热链底，见 §4.1） |
 | group_profile | 群画像（1群1条） |
 | group_jargon | 群黑话（1群N条） |
@@ -416,8 +427,14 @@ Agent 上下文窗口仅保留消息事件，通知/请求/元事件不污染对
 | bot_state | bot 在各会话的运行态（群=group_id，私聊=`private:`+user_id，P5-002） |
 | group_config | 群静态配置（mode + 状态规则参数 10 列 + 群管理开关，P5-001/002/B-015；群首次被触达自动建行，见 §9.2） |
 | schema_migrations | 迁移版本记录（version PK，B-015 起 migrate 为版本记录式） |
+| admin_user | 管理后端管理员账号（bcrypt 密码散列） |
+| recall_indexed_sources | 召回索引源版本确认，驱动可恢复增量重建 |
+| recall_documents | 由消息/摘要派生的有界检索文档，含 session/source/version/hash/事件时间 |
+| recall_document_messages | 检索文档与原始消息主键、分片位置映射 |
+| recall_fts | SQLite FTS5 trigram 关键词检索虚拟表 |
+| recall_vectors | SQLite BLOB embedding 向量（按模型指纹与维数隔离） |
 
-> 说明：共 9 张表（7 张业务表 + conversation_summary 归档摘要表 + schema_migrations 迁移版本表）。
+> 说明：当前迁移后共 15 张 SQLite 表/虚拟表（7 张核心业务表 + conversation_summary + admin_user + schema_migrations + 4 张召回派生表 + FTS5 虚拟表）。
 > member_profile（个人画像统计）已于 P3-005 移除——成员上下文由 member_facts 承担；人格为 DB 人格模板（见 §7）。
 > plugin_config（插件群配置）已移除——插件配置不落库，由插件自持（见 §8.6）。
 > group_config 为 P5-001 新增（per-group 静态配置，与 bot_state 运行态职责分离），P5-002 扩 10

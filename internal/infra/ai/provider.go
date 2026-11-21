@@ -99,7 +99,7 @@ func NewOpenAIFactory(tr *ToolsRegistry) Factory {
 		if acfg.Description == "" {
 			acfg.Description = config.DefaultAgentDescription
 		}
-		agt, err := NewEinoAgent(ctx, cm, tools, acfg)
+		agt, err := NewEinoAgent(ctx, cm, tools, acfg, ToolOutputLimitConfig{PerCallChars: cfg.Tools.MaxOutputChars, TotalChars: cfg.Tools.MaxTotalOutputChars})
 		if err != nil {
 			return nil, err
 		}

@@ -5,12 +5,17 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/cloudwego/eino/components/tool"
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
 
+	"plumebot/internal/domain"
 	"plumebot/internal/domain/entity"
+	recalltools "plumebot/internal/infra/ai/tools"
+	"plumebot/internal/infra/sqlite"
+	"plumebot/internal/service/memory"
 	"plumebot/pkg/config"
 )
 
@@ -169,6 +174,163 @@ func TestEinoAgentToolLoop(t *testing.T) {
 	}
 	if !foundToolMsg {
 		t.Errorf("第二轮输入应含 tool 结果消息，实际 %+v", second)
+	}
+}
+
+// TestEinoAgentToolOutputLimitMiddleware verifies the configured budget is propagated through Eino's tool loop.
+func TestEinoAgentToolOutputLimitMiddleware(t *testing.T) {
+	params, err := toolutils.GoStruct2ParamsOneOf[echoArgs]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := 0
+	echo := toolutils.NewTool(&schema.ToolInfo{Name: "echo", Desc: "回显", ParamsOneOf: params},
+		func(context.Context, echoArgs) (string, error) {
+			called++
+			return strings.Repeat("界", 100), nil
+		})
+	fake := &fakeChatModel{script: []*schema.Message{
+		schema.AssistantMessage("", []schema.ToolCall{{ID: "call-limit", Function: schema.FunctionCall{Name: "echo", Arguments: `{"text":"x"}`}}}),
+		schema.AssistantMessage("完成", nil),
+	}}
+	agent, err := NewEinoAgent(context.Background(), fake, []tool.BaseTool{echo}, agentCfg(""), ToolOutputLimitConfig{PerCallChars: 32, TotalChars: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agent.Generate(context.Background(), []entity.ChatMessage{usrMsg("echo")}); err != nil {
+		t.Fatal(err)
+	}
+	if called != 1 {
+		t.Fatalf("正常预算下工具应执行一次，实际 %d", called)
+	}
+	var toolText string
+	for _, message := range fake.inputs[1] {
+		if message.Role == schema.Tool && message.ToolCallID == "call-limit" {
+			toolText = message.Content
+		}
+	}
+	if utf8.RuneCountInString(toolText) > 32 || !strings.Contains(toolText, truncatedMessage) {
+		t.Fatalf("Eino tool loop 未收到受限结果: %q", toolText)
+	}
+}
+
+func TestEinoAgentBudgetNoticeSkipsSideEffectingTool(t *testing.T) {
+	params, err := toolutils.GoStruct2ParamsOneOf[echoArgs]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	echo := toolutils.NewTool(&schema.ToolInfo{Name: "echo", Desc: "副作用工具", ParamsOneOf: params},
+		func(context.Context, echoArgs) (string, error) {
+			called = true
+			return "不应执行", nil
+		})
+	fake := &fakeChatModel{script: []*schema.Message{
+		schema.AssistantMessage("", []schema.ToolCall{{ID: "call-budget", Function: schema.FunctionCall{Name: "echo", Arguments: `{"text":"x"}`}}}),
+		schema.AssistantMessage("预算不足，未执行", nil),
+	}}
+	agent, err := NewEinoAgent(context.Background(), fake, []tool.BaseTool{echo}, agentCfg(""), ToolOutputLimitConfig{PerCallChars: 60, TotalChars: 40})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agent.Generate(context.Background(), []entity.ChatMessage{usrMsg("echo")}); err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("仅剩预算提示空间时执行了可能有副作用的工具")
+	}
+	var toolText string
+	for _, message := range fake.inputs[1] {
+		if message.Role == schema.Tool && message.ToolCallID == "call-budget" {
+			toolText = message.Content
+		}
+	}
+	if toolText != budgetMessage {
+		t.Fatalf("模型收到的预算提示错误: %q", toolText)
+	}
+}
+
+type recallMemberListStub struct {
+	members []string
+}
+
+func (r recallMemberListStub) ListCurrentMembers(context.Context) ([]string, error) {
+	return r.members, nil
+}
+
+func TestEinoRecallToolLoopUsesSQLiteAndCurrentMemberScope(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, message := range []struct {
+		id, session, group, user, kind, text string
+	}{
+		{"group-hit", "g1", "g1", "101", "group", "周五见面"},
+		{"member-private", "private:101", "", "101", "private", "约定下午三点碰面"},
+		{"other-private", "private:202", "", "202", "private", "下午三点是秘密"},
+	} {
+		msg := entity.Message{
+			MessageID: message.id, GroupID: message.group, UserID: message.user, MessageType: message.kind, Timestamp: 100,
+			Parts: []entity.ContentPart{{Type: entity.PartTypeText, Text: message.text}},
+		}
+		if err := store.SaveMessage(ctx, message.session, msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending, err := store.ListDirtyRecallSources(ctx, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range pending {
+		if source.Message == nil {
+			continue
+		}
+		text := source.Message.ForLLM()
+		if source.Message.MessageType == "group" && source.Message.UserID != "" {
+			text = "[" + source.Message.UserID + "]: " + text
+		}
+		timestamp := source.Message.Timestamp
+		doc := entity.RecallDocument{
+			Kind: source.Kind, SourceID: source.ID, SegmentNo: 0, SessionKey: source.SessionKey,
+			Version: source.Version, Text: text, ContentHash: "integration-test",
+			FromRune: 0, ToRune: utf8.RuneCountInString(text), EventFrom: &timestamp, EventTo: &timestamp,
+		}
+		if applied, err := store.ReplaceRecallDocuments(ctx, source, []entity.RecallDocument{doc}); err != nil || !applied {
+			t.Fatalf("建立测试召回索引: applied=%v err=%v", applied, err)
+		}
+	}
+
+	recaller := memory.NewRecallService(store, nil)
+	recallTool := recalltools.NewRecallTool(recaller).Tool()
+	fake := &fakeChatModel{script: []*schema.Message{
+		schema.AssistantMessage("", []schema.ToolCall{{
+			ID: "recall-call", Function: schema.FunctionCall{Name: "recall_memory", Arguments: `{"query":"下午三点"}`},
+		}}),
+		schema.AssistantMessage("我找到以前的约定。", nil),
+	}}
+	agent, err := NewEinoAgent(ctx, fake, []tool.BaseTool{recallTool}, agentCfg(""), ToolOutputLimitConfig{PerCallChars: 1200, TotalChars: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx := entity.WithSession(ctx, entity.Session{GroupID: "g1", UserID: "101"})
+	runCtx = domain.WithGroupMemberReader(runCtx, recallMemberListStub{members: []string{"101", "303"}})
+	if _, err := agent.Generate(runCtx, []entity.ChatMessage{usrMsg("之前约了什么？")}); err != nil {
+		t.Fatal(err)
+	}
+	var recallOutput string
+	for _, message := range fake.inputs[1] {
+		if message.Role == schema.Tool && message.ToolCallID == "recall-call" {
+			recallOutput = message.Content
+		}
+	}
+	if !strings.Contains(recallOutput, "约定下午三点碰面") || !strings.Contains(recallOutput, "QQ 101") {
+		t.Fatalf("真实 Agent tool loop 未召回当前成员私聊内容: %q", recallOutput)
+	}
+	if strings.Contains(recallOutput, "下午三点是秘密") || strings.Contains(recallOutput, "QQ 202") {
+		t.Fatalf("跨越成员范围泄露了其他用户私聊: %q", recallOutput)
 	}
 }
 

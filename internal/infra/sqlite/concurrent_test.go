@@ -60,7 +60,7 @@ func TestConcurrentReadWriteNoBusy(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			for j := 0; j < rounds; j++ {
-				record(st.SaveMessage(ctx, entity.Message{
+				record(st.SaveMessage(ctx, fmt.Sprintf("g%d", n%3), entity.Message{
 					MessageID:   fmt.Sprintf("m-%d-%d", n, j),
 					GroupID:     fmt.Sprintf("g%d", n%3),
 					UserID:      "u1",

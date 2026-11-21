@@ -103,9 +103,10 @@ func (c *Compressor) compress(ctx context.Context, chatID string) error {
 		return fmt.Errorf("一级压缩失败: %w", err)
 	}
 	sum := parseSummary(text)
+	sum.EventFrom, sum.EventTo = messageEventRange(batch)
 
 	// 3. 入热链。
-	c.summaries.Append(ctx, chatID, sum.Text, sum.Keywords, sum.Decisions)
+	c.summaries.Append(ctx, chatID, sum.Text, sum.Keywords, sum.Decisions, sum.EventFrom, sum.EventTo)
 
 	// 4. 热链超上限 → 二级融合；融合失败则 FIFO 淘汰最旧兜底。
 	c.maybeFuse(ctx, chatID)
@@ -138,7 +139,7 @@ func (c *Compressor) maybeFuse(ctx context.Context, chatID string) {
 		c.summaries.EvictOldest(ctx, chatID)
 		return
 	}
-	c.summaries.ReplaceWithFused(ctx, chatID, fused.Text, fused.Keywords, fused.Decisions)
+	c.summaries.ReplaceWithFused(ctx, chatID, fused.Text, fused.Keywords, fused.Decisions, fused.EventFrom, fused.EventTo)
 }
 
 // fuseSummaries 调用 LLM 把多条历史摘要融合为一条综合摘要。
@@ -147,7 +148,50 @@ func (c *Compressor) fuseSummaries(ctx context.Context, chain []entity.Summary) 
 	if err != nil {
 		return entity.Summary{}, fmt.Errorf("二级融合失败: %w", err)
 	}
-	return parseSummary(text), nil
+	sum := parseSummary(text)
+	sum.EventFrom, sum.EventTo = summaryEventRange(chain)
+	return sum, nil
+}
+
+// summaryEventRange 只有所有输入摘要都记录了事件范围时才返回融合后的包络；
+// 旧归档的 CreatedAt 是生成时间，不可冒充对话时间。
+func summaryEventRange(chain []entity.Summary) (*int64, *int64) {
+	if len(chain) == 0 {
+		return nil, nil
+	}
+	var earliest, latest int64
+	for i, sum := range chain {
+		if sum.EventFrom == nil || sum.EventTo == nil {
+			return nil, nil
+		}
+		if i == 0 || *sum.EventFrom < earliest {
+			earliest = *sum.EventFrom
+		}
+		if i == 0 || *sum.EventTo > latest {
+			latest = *sum.EventTo
+		}
+	}
+	return &earliest, &latest
+}
+
+// messageEventRange 返回压缩批次的事件时间包络；缺少可靠时间的消息令范围未知。
+func messageEventRange(messages []entity.Message) (*int64, *int64) {
+	if len(messages) == 0 {
+		return nil, nil
+	}
+	var earliest, latest int64
+	for i, msg := range messages {
+		if msg.Timestamp <= 0 {
+			return nil, nil
+		}
+		if i == 0 || msg.Timestamp < earliest {
+			earliest = msg.Timestamp
+		}
+		if i == 0 || msg.Timestamp > latest {
+			latest = msg.Timestamp
+		}
+	}
+	return &earliest, &latest
 }
 
 // --- prompt 与输出解析 ---

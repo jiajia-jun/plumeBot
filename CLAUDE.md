@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Go 版本 | 1.26.4 (go.mod: `go 1.26.4`) |
 | 模块名 | `plumebot` |
 | 入口 | `cmd/bot/main.go` |
-| 当前阶段 | 第七阶段：管理后端（P7-001 管理配置 API、P7-002 网页日志浏览、P7-003 对话历史只读浏览已完结；第六阶段 P6-003 端到端压测待实现） |
+| 当前阶段 | 第七阶段：管理后端（P7-001 管理配置 API、P7-002 网页日志浏览、P7-003 对话历史只读浏览已完结；第六阶段 P6-005 历史记忆召回已完结，P6-003 端到端压测待实现） |
 | 任务台账 | `docs/roadmap.md`（阶段任务表 + 「待办与遗留事项」B 台账，完成即删行） |
 
 ```bash
@@ -174,6 +174,7 @@ config 新增 admin 段（enabled / port / jwt_secret / token_ttl_seconds，双�
 前端在气泡列表**上方**渲染「更早的对话纪要」区块（摘要=窗口之前已压缩的历史，语义连贯），
 **不区分一级压缩/二级融合**（管理面只需「这里有一段更早的纪要」），仅显示当前热链
 （被二级融合覆盖的一级原件只在 conversation_summary 归档表，本期不展示）。
+已完成：P6-005 主动历史记忆召回（混合 RAG，roadmap P6-005）：`recall_memory` 只读 Eino tool；SQLite 004 迁移为 messages 加显式 `session_key`/源版本，并维护可重建的 FTS5 trigram 文档与可选 BLOB embedding（`vec_distance_cosine` 精确扫描，不是 ANN）；原始消息与摘要同权，经 RRF/去重/时间边界/候选限制返回。`domain.MemoryRecaller` → service/memory 实现 scope 与融合，`domain.RecallStore`/`Embedder`/`RecallIndexStore` 分别由 sqlite/ai 实现，infra 不互相依赖；main 只在启用 `recall_memory` 时启动 worker，并在 SQLite 关闭前等待 worker 退出。私聊仅搜当前用户；群聊默认额外搜当前群成员私聊，成员接口失败则只查本群并标 partial（这是用户明确选择的隐私范围）。旧私聊 self 回复归属未知，保留空 session 且不猜测（roadmap B-052）；摘要事件时间不使用 created_at 冒充。`llm.embedding_model` 引用 `models[].name`，空值只走本地关键词；启用后历史可归属原文/摘要（含私聊）、新增内容和 query 会发往配置的外部 embedding 服务，可能产生费用，文档已明确。Eino `ToolMiddleware` 对普通/流式/增强工具统一限长：单次默认 2500、硬上限 4000、单轮总量 6000 字符，预算并行安全；字符数不等价 token 数。同 provider/base_url/model 同维数的服务端权重静默替换无法识别，见 B-053。
 ```
 
 禁止提前实现（跨阶段禁令，后续阶段能力勿提前实装）：
@@ -207,7 +208,7 @@ config 新增 admin 段（enabled / port / jwt_secret / token_ttl_seconds，双�
 
 可选能力（默认关闭）：
 
-- LLM API embedding（向量检索开关，需用户自行配置 API）。
+- LLM API embedding（可选，`llm.embedding_model` 按 `models[].name` 引用；默认空，关键词召回仍可用）。
 
 ## 4. 工程目录
 

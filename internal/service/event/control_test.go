@@ -21,7 +21,7 @@ type tailStore struct {
 	saved []entity.Message // SaveMessage 记录（含 bot 回复），供持久化断言
 }
 
-func (t *tailStore) SaveMessage(_ context.Context, msg entity.Message) error {
+func (t *tailStore) SaveMessage(_ context.Context, _ string, msg entity.Message) error {
 	t.saved = append(t.saved, msg)
 	return nil
 }

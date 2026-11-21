@@ -76,9 +76,9 @@ const (
 
 	// 管理后端默认值（P7-001 起由 cmd/bot 消费；port≤0/ttl≤0 时消费方兜底，
 	// 与 config.default.yaml admin 段的推荐值一致，改动需双处同步）。
-	DefaultAdminPort               = 9321  // admin.port 空 → 9321（起始端口，被占用逐次 +1）
-	MaxAdminPort                   = 10024 // 端口扫描上限（含；全范围占用仅告警）
-	DefaultAdminTokenTTLSeconds    = 86400 // admin.token_ttl_seconds ≤0 → 24h
+	DefaultAdminPort            = 9321  // admin.port 空 → 9321（起始端口，被占用逐次 +1）
+	MaxAdminPort                = 10024 // 端口扫描上限（含；全范围占用仅告警）
+	DefaultAdminTokenTTLSeconds = 86400 // admin.token_ttl_seconds ≤0 → 24h
 )
 
 // Config 是应用程序的根配置结构体。
@@ -162,6 +162,8 @@ type LLMConfig struct {
 	ChatModel string `mapstructure:"chat_model"`
 	// VisionModel 引用 Models[].name 指定图片描述模型；空 = 描述关闭。
 	VisionModel string `mapstructure:"vision_model"`
+	// EmbeddingModel 引用 Models[].name 指定向量模型；空 = 关闭语义向量检索。
+	EmbeddingModel string `mapstructure:"embedding_model"`
 	// Prompt 是 prompt 组装（BuildMessages，P6-001）的上限/预算参数。
 	Prompt PromptConfig `mapstructure:"prompt"`
 }
@@ -223,10 +225,22 @@ func (c LLMConfig) VisionEntry() (LLMModelConfig, bool) {
 	return c.ByName(c.VisionModel)
 }
 
+// EmbeddingEntry 返回向量模型条目；EmbeddingModel 为空时不启用语义检索。
+func (c LLMConfig) EmbeddingEntry() (LLMModelConfig, bool) {
+	if c.EmbeddingModel == "" {
+		return LLMModelConfig{}, false
+	}
+	return c.ByName(c.EmbeddingModel)
+}
+
 // ToolsConfig 包含工具（function calling）配置。
 type ToolsConfig struct {
-	// Enabled 启用的工具名列表；空 = 不注册任何工具（仅机制，P3-004 起注册具体工具）。
+	// Enabled 启用的工具名列表；空 = 不注册任何工具。
 	Enabled []string `mapstructure:"enabled"`
+	// MaxOutputChars 单个工具调用结果的默认字符上限；≤0 时由 infra/ai 按默认值兜底。
+	MaxOutputChars int `mapstructure:"max_output_chars"`
+	// MaxTotalOutputChars 单次 Agent 推理内全部工具结果总字符上限；≤0 时由 infra/ai 按默认值兜底。
+	MaxTotalOutputChars int `mapstructure:"max_total_output_chars"`
 }
 
 // AgentConfig 包含 agent 元数据与人设配置（P2-004 阶段 5 起由 infra/ai 消费）。

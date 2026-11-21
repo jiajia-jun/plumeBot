@@ -9,8 +9,10 @@ import (
 // Storage 持久化接口，覆盖全部 8 张业务表。
 type Storage interface {
 	// ── messages ──
-	SaveMessage(ctx context.Context, msg entity.Message) error
-	GetMessages(ctx context.Context, groupID string, limit int, offset int) ([]entity.Message, error)
+	// SaveMessage 按显式会话键保存消息；私聊 bot 回复需使用触发用户的会话键。
+	SaveMessage(ctx context.Context, sessionKey string, msg entity.Message) error
+	// GetMessages 按会话键获取最近消息，按时间倒序，支持分页（limit/offset）。
+	GetMessages(ctx context.Context, sessionKey string, limit int, offset int) ([]entity.Message, error)
 	// UpdateMessageParts 覆盖一条消息的内容段（P6-001 B-025：图片描述写回 messages.parts）。
 	// 幂等：message_id 不存在时不做任何事、不报错。
 	UpdateMessageParts(ctx context.Context, messageID string, parts []entity.ContentPart) error

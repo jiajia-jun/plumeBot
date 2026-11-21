@@ -145,7 +145,7 @@ func TestMessagesRoundTrip(t *testing.T) {
 		Timestamp:   1700000000,
 		MessageType: "group",
 	}
-	if err := s.SaveMessage(ctx, msg); err != nil {
+	if err := s.SaveMessage(ctx, "g1", msg); err != nil {
 		t.Fatalf("SaveMessage 失败: %v", err)
 	}
 
@@ -166,7 +166,7 @@ func TestMessagesRoundTrip(t *testing.T) {
 	}
 
 	// 空 Parts → 存 "[]"，读回空切片（非 nil）。
-	if err := s.SaveMessage(ctx, entity.Message{MessageID: "m2", GroupID: "g1", UserID: "u1", MessageType: "group"}); err != nil {
+	if err := s.SaveMessage(ctx, "g1", entity.Message{MessageID: "m2", GroupID: "g1", UserID: "u1", MessageType: "group"}); err != nil {
 		t.Fatalf("SaveMessage 空 Parts 失败: %v", err)
 	}
 	got2, _ := s.GetMessages(ctx, "g1", 10, 0)
@@ -192,7 +192,7 @@ func TestUpdateMessageParts(t *testing.T) {
 		{Type: entity.PartTypeText, Text: "看看"},
 		{Type: entity.PartTypeImage, URL: "https://example.com/cat.png"},
 	}
-	if err := s.SaveMessage(ctx, entity.Message{MessageID: "m1", GroupID: "g1", UserID: "u1", Parts: parts, MessageType: "group"}); err != nil {
+	if err := s.SaveMessage(ctx, "g1", entity.Message{MessageID: "m1", GroupID: "g1", UserID: "u1", Parts: parts, MessageType: "group"}); err != nil {
 		t.Fatalf("SaveMessage 失败: %v", err)
 	}
 

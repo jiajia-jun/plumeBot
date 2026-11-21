@@ -32,7 +32,7 @@ type fakeStorage struct {
 	archived []entity.Summary // SaveSummary 落库的归档摘要
 }
 
-func (f *fakeStorage) SaveMessage(_ context.Context, msg entity.Message) error {
+func (f *fakeStorage) SaveMessage(_ context.Context, _ string, msg entity.Message) error {
 	f.saved = append(f.saved, msg)
 	return nil
 }
