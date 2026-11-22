@@ -13,6 +13,7 @@ import (
 
 	"plumebot/internal/domain"
 	"plumebot/internal/domain/entity"
+	"plumebot/internal/infra/ai/toolmiddleware"
 	recalltools "plumebot/internal/infra/ai/tools"
 	"plumebot/internal/infra/sqlite"
 	"plumebot/internal/service/memory"
@@ -193,7 +194,7 @@ func TestEinoAgentToolOutputLimitMiddleware(t *testing.T) {
 		schema.AssistantMessage("", []schema.ToolCall{{ID: "call-limit", Function: schema.FunctionCall{Name: "echo", Arguments: `{"text":"x"}`}}}),
 		schema.AssistantMessage("完成", nil),
 	}}
-	agent, err := NewEinoAgent(context.Background(), fake, []tool.BaseTool{echo}, agentCfg(""), ToolOutputLimitConfig{PerCallChars: 32, TotalChars: 80})
+	agent, err := NewEinoAgent(context.Background(), fake, []tool.BaseTool{echo}, agentCfg(""), toolmiddleware.ToolOutputLimitConfig{PerCallChars: 32, TotalChars: 80})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +210,7 @@ func TestEinoAgentToolOutputLimitMiddleware(t *testing.T) {
 			toolText = message.Content
 		}
 	}
-	if utf8.RuneCountInString(toolText) > 32 || !strings.Contains(toolText, truncatedMessage) {
+	if utf8.RuneCountInString(toolText) > 32 || !strings.Contains(toolText, "工具结果已截断") {
 		t.Fatalf("Eino tool loop 未收到受限结果: %q", toolText)
 	}
 }
@@ -229,7 +230,7 @@ func TestEinoAgentBudgetNoticeSkipsSideEffectingTool(t *testing.T) {
 		schema.AssistantMessage("", []schema.ToolCall{{ID: "call-budget", Function: schema.FunctionCall{Name: "echo", Arguments: `{"text":"x"}`}}}),
 		schema.AssistantMessage("预算不足，未执行", nil),
 	}}
-	agent, err := NewEinoAgent(context.Background(), fake, []tool.BaseTool{echo}, agentCfg(""), ToolOutputLimitConfig{PerCallChars: 60, TotalChars: 40})
+	agent, err := NewEinoAgent(context.Background(), fake, []tool.BaseTool{echo}, agentCfg(""), toolmiddleware.ToolOutputLimitConfig{PerCallChars: 60, TotalChars: 40})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +246,7 @@ func TestEinoAgentBudgetNoticeSkipsSideEffectingTool(t *testing.T) {
 			toolText = message.Content
 		}
 	}
-	if toolText != budgetMessage {
+	if !strings.Contains(toolText, "预算已耗尽") {
 		t.Fatalf("模型收到的预算提示错误: %q", toolText)
 	}
 }
@@ -311,7 +312,7 @@ func TestEinoRecallToolLoopUsesSQLiteAndCurrentMemberScope(t *testing.T) {
 		}}),
 		schema.AssistantMessage("我找到以前的约定。", nil),
 	}}
-	agent, err := NewEinoAgent(ctx, fake, []tool.BaseTool{recallTool}, agentCfg(""), ToolOutputLimitConfig{PerCallChars: 1200, TotalChars: 2000})
+	agent, err := NewEinoAgent(ctx, fake, []tool.BaseTool{recallTool}, agentCfg(""), toolmiddleware.ToolOutputLimitConfig{PerCallChars: 1200, TotalChars: 2000})
 	if err != nil {
 		t.Fatal(err)
 	}

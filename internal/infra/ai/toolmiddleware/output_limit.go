@@ -1,4 +1,4 @@
-package ai
+package toolmiddleware
 
 import (
 	"context"
@@ -35,7 +35,8 @@ type toolOutputBudget struct {
 	remaining int
 }
 
-func withToolOutputBudget(ctx context.Context, cfg ToolOutputLimitConfig) context.Context {
+// WithToolOutputBudget 为单次 Agent 运行创建新的输出预算。
+func WithToolOutputBudget(ctx context.Context, cfg ToolOutputLimitConfig) context.Context {
 	if cfg.TotalChars <= 0 {
 		cfg.TotalChars = defaultToolTotalOutputChars
 	}

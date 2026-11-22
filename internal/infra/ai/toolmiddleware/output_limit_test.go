@@ -1,4 +1,4 @@
-package ai
+package toolmiddleware
 
 import (
 	"context"
@@ -45,7 +45,7 @@ func TestToolOutputLimiterKeepsShortAndClampsLong(t *testing.T) {
 	endpoint := middleware.Invokable(func(context.Context, *compose.ToolInput) (*compose.ToolOutput, error) {
 		return &compose.ToolOutput{Result: strings.Repeat("字", 100)}, nil
 	})
-	ctx := withToolOutputBudget(context.Background(), ToolOutputLimitConfig{TotalChars: 80})
+	ctx := WithToolOutputBudget(context.Background(), ToolOutputLimitConfig{TotalChars: 80})
 	out, err := endpoint(ctx, &compose.ToolInput{Arguments: `{}`})
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestToolOutputLimiterKeepsShortAndClampsLong(t *testing.T) {
 	short := middleware.Invokable(func(context.Context, *compose.ToolInput) (*compose.ToolOutput, error) {
 		return &compose.ToolOutput{Result: "保留短结果"}, nil
 	})
-	shortCtx := withToolOutputBudget(context.Background(), ToolOutputLimitConfig{TotalChars: 80})
+	shortCtx := WithToolOutputBudget(context.Background(), ToolOutputLimitConfig{TotalChars: 80})
 	shortOut, err := short(shortCtx, &compose.ToolInput{Arguments: `{}`})
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestToolOutputLimiterSkipsCallWhenOnlyBudgetNoticeFits(t *testing.T) {
 		called = true
 		return &compose.ToolOutput{Result: "不应执行"}, nil
 	})
-	ctx := withToolOutputBudget(context.Background(), ToolOutputLimitConfig{TotalChars: 40})
+	ctx := WithToolOutputBudget(context.Background(), ToolOutputLimitConfig{TotalChars: 40})
 	out, err := endpoint(ctx, &compose.ToolInput{Arguments: `{}`})
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestToolOutputLimiterParallelBudgetIsAtomic(t *testing.T) {
 		<-release
 		return &compose.ToolOutput{Result: "短回执"}, nil
 	})
-	ctx := withToolOutputBudget(context.Background(), ToolOutputLimitConfig{TotalChars: 100})
+	ctx := WithToolOutputBudget(context.Background(), ToolOutputLimitConfig{TotalChars: 100})
 	firstOutput := make(chan string, 1)
 	go func() {
 		out, err := endpoint(ctx, &compose.ToolInput{Arguments: `{}`})
@@ -222,7 +222,7 @@ func TestToolOutputLimiterHardCapAndNoRoomError(t *testing.T) {
 		called = true
 		return &compose.ToolOutput{Result: "副作用"}, nil
 	})
-	ctx := withToolOutputBudget(context.Background(), ToolOutputLimitConfig{TotalChars: 10})
+	ctx := WithToolOutputBudget(context.Background(), ToolOutputLimitConfig{TotalChars: 10})
 	if _, err := blocked(ctx, &compose.ToolInput{Arguments: `{}`}); err == nil {
 		t.Fatal("剩余预算连提示都放不下时应返回错误")
 	}

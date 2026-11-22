@@ -132,7 +132,7 @@ Agent 通过 eino Tool 机制驱动记忆更新，在对话中自行判断何时
 - **访问范围**：私聊只允许当前用户的 `private:<user_id>`；群聊允许当前群，以及**本次查询时 OneBot 成员列表中的当前群成员私聊会话**。成员列表通过 `get_group_member_list(no_cache=true)` 每次查询获取；查询失败/成员返回不完整时 fail-closed 到本群，并将结果标为部分覆盖，绝不扩大到全库。该默认行为意味着群里可能复述成员与 bot 的私聊内容，是产品隐私边界；此默认已由用户明确选择。成员在列表快照之后退出/加入群，查询无法与平台列表变更做事务级一致。
 - **外部 embedding 与隐私/费用**：默认 `llm.embedding_model: ""`，此时只做本地关键词检索，不发送 embedding 请求。若填写已有 `llm.models[].name`，且 `recall_memory` 已启用，后台会批量向该 OpenAI 兼容 embedding endpoint 发送所有可可靠归属的历史原文、摘要，以及之后新增/更新的内容；每次语义查询也会发送 query。数据包括私聊历史，可能产生费用并适用该服务商的数据处理政策。清空 `embedding_model` 后停止向量请求；禁用 `recall_memory` 后不启动索引 worker。已有 `config.yaml` 不会在启动时自动与默认模板合并：升级后需手动将 `recall_memory` 加入 `tools.enabled`；启用语义检索时，还需在 `llm.models` 配置 OpenAI 兼容模型条目，并将 `llm.embedding_model` 设为该条目的 `name`，空值则继续使用纯关键词召回。密钥、query 正文和 API 响应正文不得写入日志。模型 endpoint/name 变化会隔离新向量空间并补建；向量维数变化会被识别并触发重建，同一 endpoint/model 背后的权重静默替换无法自动识别，需使用新模型标识或手动重建派生向量。
 - **会话与时间边界**：004 迁移为 `messages` 增加显式 `session_key`，新消息（包括私聊 bot 回复）按触发会话落库；旧群消息与可确认的私聊入站消息回填。无法可靠归属的旧私聊 `self:` bot 回复保持空 session，不猜测用户且不进入私聊召回；这部分历史无法由现有行恢复归属。摘要事件时间与 `created_at`（摘要生成时间）分开保存；旧摘要事件时间未知。带时间查询只返回事件范围完整落在边界内的内容，对未知时间与跨界摘要标记部分覆盖，不把生成时间冒充对话时间。
-- **统一工具输出上限**：Eino `ToolMiddleware` 覆盖普通/流式/增强工具；每次工具调用默认最多 2500 字符（配置 `tools.max_output_chars`，硬上限 4000），单轮 Agent 工具结果累计默认 6000 字符（`tools.max_total_output_chars`）。并行调用原子预留预算；不足以容纳提示时跳过可能有副作用的工具，完全放不下提示则终止本轮。JSON 截断保持合法包络。字符预算不是 token 预算，不能单独保证完整 prompt 未超过模型上下文。
+- **工具中间件与输出上限**：集中在 `internal/infra/ai/toolmiddleware`，对普通、流式及增强工具调用统一挂载生命周期日志和输出限额；每个已分发调用按 `tool_call_id` 记录一条终态（Info `returned`、Warn 错误/取消/panic），未知工具由 `UnknownToolsHandler` 记录后仍返回错误。每次工具调用默认最多 2500 字符（配置 `tools.max_output_chars`，硬上限 4000），单轮 Agent 工具结果累计默认 6000 字符（`tools.max_total_output_chars`）。并行调用原子预留预算；不足以容纳提示时跳过可能有副作用的工具，完全放不下提示则终止本轮。JSON 截断保持合法包络。字符预算不是 token 预算，不能单独保证完整 prompt 未超过模型上下文。
 
 ---
 
@@ -664,8 +664,8 @@ Ctrl+C 直接终止进程（防卡死）。
 | 文件 | 记录 | 备注 |
 |---|---|---|
 | `debug.log` | 仅 Debug | 高频细节（窗口/画像/压缩跳过/发送成功/元事件） |
-| `info.log` | 仅 Info | 消息入口 + 结局账本 + 模型调用 + 写操作审计 + 启动里程碑 |
-| `warn.log` | 仅 Warn | 被拦截 / 各环节失败 / 护栏拒绝 / 429 / 401 |
+| `info.log` | 仅 Info | 消息入口 + 结局账本 + 模型调用 + AI 工具调用生命周期 + 写操作审计 + 启动里程碑 |
+| `warn.log` | 仅 Warn | 被拦截 / 工具调用错误、取消、panic、未知工具 / 各环节失败 / 护栏拒绝 / 429 / 401 |
 | `error.log` | 仅 Error | 服务级故障（自动带 stacktrace） |
 | `fatal.log` | 仅 Fatal | 启动致命错误（记账后 `os.Exit(1)`）；**Init 前**（`zl==nil`）改打 stderr 保证可见 |
 | `gin.log` | gin 每请求访问 | 经 `pkg/logger.GinAccessWriter()`（同滚动策略）；`/ping` 健康轮询也在其中，不再刷 stdout |
@@ -683,7 +683,7 @@ Ctrl+C 直接终止进程（防卡死）。
 | service/event | 消息入口 + 结局账本 + 中间件拦截 | 结局细节不另打语义重复行 |
 | service/memory·control·agent | 内部细节 Debug、关键成功 Info、失败 Warn | — |
 | service/admin + handler/web | 管理审计 + 429/401 | 密钥/token/密码明文 |
-| infra/ai | 模型调用度量 + 记忆工具写库审计 | 群管理动作审计（收敛到执行器，见下） |
+| infra/ai | 模型调用度量 + `toolmiddleware` 工具调用生命周期日志 + 记忆工具写库审计 | 群管理动作审计（收敛到执行器，见下） |
 | infra/sqlite | Open/迁移成功、迁移失败 Error | SQL 级慢查询（本期不做） |
 | pkg/config | 模板写入、env 覆盖变量名、加载成功 | env 值/密钥 |
 | cmd/bot main | 启动各步成功/失败、jwt secret 生命周期 | 密钥本身 |
@@ -695,14 +695,15 @@ Ctrl+C 直接终止进程（防卡死）。
 3. 群管理动作审计**只**落在 `GroupManager.Execute`，工具层（`group_tools.go`）与插件执行层（`command.go executeActions`）不重复。
 4. 发送成功防重复：`sender.Send` 成功只打 Debug，结局行（`agent_replied`）才是 Info 锚点。
 5. 拦截/失败详情（命中词、错误对象）作为结局行自带字段，不另起语义相同的日志。
+6. 每次 AI 工具调用只由 `infra/ai/toolmiddleware` 写一条终态日志（未知工具由同包 handler 兜底）；通用日志不写参数/返回正文。记忆写入与群管理审计各自记录业务细节，不在工具层复制动作详情。
 
 ### 17.3 等级语义
 
 | 级别 | 语义 | 典型位置 |
 |---|---|---|
 | Debug | 高频细节 | 窗口操作、画像缓存命中/失效、压缩跳过/冷却、发送成功、元事件 |
-| Info | 正常业务里程碑 | 消息入口、结局（正常）、命令成功、模型调用、压缩成功、sqlite 打开/迁移、config 模板写入/env 覆盖、jwt 生成、写操作审计 |
-| Warn | 可恢复问题 / 被拦截 | 限流丢弃、敏感词拦截、各环节失败、群管理护栏拒绝/API 失败、429/401、改密失败 |
+| Info | 正常业务里程碑 | 消息入口、结局（正常）、命令成功、模型调用、工具调用（已返回）、压缩成功、sqlite 打开/迁移、config 模板写入/env 覆盖、jwt 生成、写操作审计 |
+| Warn | 可恢复问题 / 被拦截 | 限流丢弃、敏感词拦截、各环节失败、工具调用错误/取消/panic/未知工具、群管理护栏拒绝/API 失败、429/401、改密失败 |
 | Error | 服务级故障 | web 异常退出、admin API 内部错误、迁移失败 |
 | Fatal | 启动致命错误 | 初始化失败（落 fatal.log） |
 
@@ -740,6 +741,7 @@ Ctrl+C 直接终止进程（防卡死）。
 - **群管理动作**：`GroupManager.Execute` 统一审计（group_id、actor、op、target、结果）；护栏拒绝
   （开关关 / 非管理员 / 时长钳制）Warn。
 - **记忆工具写库**（store_fact / learn_jargon / forget_fact）：成功 Info / 失败 Warn，带会话归属。
+- **AI 工具调用生命周期**：`infra/ai/toolmiddleware` 按每次 endpoint 调用记录 `tool_name`、`tool_call_id`、`outcome`、`latency_ms`，并经 `logger.From(ctx)` 携带 `trace_id`；未知工具名经 `UnknownToolsHandler` 同样记录后维持失败。只记录调用元数据，不记录原始参数/返回正文；`returned` 表示工具端点正常返回，不代表业务操作一定成功。记忆写入与 `GroupManager.Execute` 的动作审计仍记录各自业务细节，不在通用调用行重复记录。
 - **绝不入日志**：API key、JWT 密钥、密码、token——只标 `api_key_set: true/false`，只记录环境变量**名**不记录值。
 
 ### 17.6 日志浏览（管理后端）
@@ -754,12 +756,9 @@ Ctrl+C 直接终止进程（防卡死）。
 | QQ 群消息 | `group:<群号>` | `infra/onebot` matcher 闭包构造事件 ctx 时注入 |
 | QQ 私聊消息 | `private:<对方QQ号>` | 同上 |
 
-- `logger.Context(ctx, fields...)` 注入派生 logger（`zl.With(fields...)`）；`logger.From(ctx)` 取出，
-  未注入时**回退全局 logger**（故存量调用无需一次改完，可渐进接入）。
-- 已接入 trace_id 的行（关键路径）：消息入口行与结局行（`logOutcome` 带 ctx）、命令/限流/敏感词拦截、
-  插件回复失败、固定文案发送、群管理动作审计、记忆工具写库、三类模型调用度量（agent/摘要/图片描述）、
-  admin 审计与登录注册改密。**其余人工 Debug 细节行不带 trace_id**（覆盖范围以本节为准）。
-- 一次会话的全部动态因此可在浏览页按 trace_id 一键串联（入口行 → 结局行 → 模型调用 → 群管理动作）。
+- `logger.Context(ctx, fields...)` 注入带附加字段的派生 logger；`logger.WithLogger(ctx, l)` 注入指定 logger；`logger.From(ctx)` 取出，未注入时**回退全局 logger**（故存量调用无需一次改完，可渐进接入）。
+- 已接入 trace_id 的行（关键路径）：消息入口行与结局行（`logOutcome` 带 ctx）、命令/限流/敏感词拦截、插件回复失败、固定文案发送、群管理动作审计、记忆工具写库、三类模型调用度量（agent/摘要/图片描述）、AI 工具调用生命周期（含未知工具名），admin 审计与登录注册改密。**其余人工 Debug 细节行不带 trace_id**（覆盖范围以本节为准）。
+- 一次会话的全部动态因此可在浏览页按 trace_id 一键串联（入口行 → 结局行 → 模型调用 → 工具调用 → 群管理动作）。
 
 **读取实现**（`internal/infra/logfile`，纯标准库零依赖）：
 

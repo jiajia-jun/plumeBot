@@ -15,6 +15,7 @@ import (
 
 	"plumebot/internal/domain"
 	"plumebot/internal/domain/entity"
+	"plumebot/internal/infra/ai/toolmiddleware"
 	"plumebot/pkg/config"
 	"plumebot/pkg/logger"
 )
@@ -35,7 +36,7 @@ var _ domain.Agent = (*EinoAgent)(nil)
 type EinoAgent struct {
 	agent        *adk.ChatModelAgent
 	model        string
-	outputLimits ToolOutputLimitConfig
+	outputLimits toolmiddleware.ToolOutputLimitConfig
 }
 
 // NewEinoAgent 组装 eino ChatModelAgent。
@@ -46,8 +47,8 @@ type EinoAgent struct {
 // 非空时仍会经 Instruction 前置，用于兜底/测试）；
 // tools 为空时不注入 ToolsConfig（空 ToolsNodeConfig 行为未验证，不冒险）；
 // MaxIterations 显式兜底 defaultMaxIterations。outputLimits 可选；未传时使用默认字符预算。
-func NewEinoAgent(ctx context.Context, cm model.BaseChatModel, tools []tool.BaseTool, acfg config.AgentConfig, outputLimits ...ToolOutputLimitConfig) (*EinoAgent, error) {
-	limits := ToolOutputLimitConfig{}
+func NewEinoAgent(ctx context.Context, cm model.BaseChatModel, tools []tool.BaseTool, acfg config.AgentConfig, outputLimits ...toolmiddleware.ToolOutputLimitConfig) (*EinoAgent, error) {
+	limits := toolmiddleware.ToolOutputLimitConfig{}
 	if len(outputLimits) > 0 {
 		limits = outputLimits[0]
 	}
@@ -61,8 +62,12 @@ func NewEinoAgent(ctx context.Context, cm model.BaseChatModel, tools []tool.Base
 	if len(tools) > 0 {
 		cfg.ToolsConfig = adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools:               tools,
-				ToolCallMiddlewares: []compose.ToolMiddleware{NewToolOutputLimiter(limits)},
+				Tools: tools,
+				ToolCallMiddlewares: []compose.ToolMiddleware{
+					toolmiddleware.NewToolCallLogger(),
+					toolmiddleware.NewToolOutputLimiter(limits),
+				},
+				UnknownToolsHandler: toolmiddleware.HandleUnknownTool,
 			},
 		}
 	}
@@ -93,7 +98,7 @@ func (e *EinoAgent) Generate(ctx context.Context, msgs []entity.ChatMessage) (st
 		return "", err
 	}
 
-	runCtx := withToolOutputBudget(ctx, e.outputLimits)
+	runCtx := toolmiddleware.WithToolOutputBudget(ctx, e.outputLimits)
 	iter := e.agent.Run(runCtx, &adk.AgentInput{Messages: schemaMsgs, EnableStreaming: false})
 
 	var last *schema.Message

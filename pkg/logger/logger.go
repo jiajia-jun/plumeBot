@@ -175,6 +175,11 @@ func Context(ctx context.Context, fields ...zap.Field) context.Context {
 	return context.WithValue(ctx, ctxKey{}, derived(fields...))
 }
 
+// WithLogger 将指定的 zap logger 注入 ctx。
+func WithLogger(ctx context.Context, l *zap.Logger) context.Context {
+	return context.WithValue(ctx, ctxKey{}, l)
+}
+
 // From 取出 ctx 中注入的派生 logger；未注入回退全局 logger（行为与包级 Debug/Info/... 一致，
 // 便于渐进接入 trace_id 而不必一次改完所有调用）；两者皆无（未 Init）返回 no-op logger，
 // 保证返回值非 nil，调用方无需判空。

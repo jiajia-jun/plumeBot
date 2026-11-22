@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 
 	"plumebot/internal/domain"
+	"plumebot/internal/infra/ai/toolmiddleware"
 	"plumebot/pkg/config"
 )
 
@@ -99,7 +100,7 @@ func NewOpenAIFactory(tr *ToolsRegistry) Factory {
 		if acfg.Description == "" {
 			acfg.Description = config.DefaultAgentDescription
 		}
-		agt, err := NewEinoAgent(ctx, cm, tools, acfg, ToolOutputLimitConfig{PerCallChars: cfg.Tools.MaxOutputChars, TotalChars: cfg.Tools.MaxTotalOutputChars})
+		agt, err := NewEinoAgent(ctx, cm, tools, acfg, toolmiddleware.ToolOutputLimitConfig{PerCallChars: cfg.Tools.MaxOutputChars, TotalChars: cfg.Tools.MaxTotalOutputChars})
 		if err != nil {
 			return nil, err
 		}

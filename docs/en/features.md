@@ -121,8 +121,8 @@ Logs go to files only (not the terminal), split per exact level:
 | File | Records |
 |------|---------|
 | `debug.log` | Debug only: window / profile / compression / send-success and other high-frequency detail |
-| `info.log` | Info only: the message ledger (entry + outcome), model calls, write audit, startup milestones |
-| `warn.log` | Warn only: rejected messages, guard denies, per-step failures, 429/401 |
+| `info.log` | Info only: the message ledger (entry + outcome), model calls, AI tool-call lifecycle, write audit, startup milestones |
+| `warn.log` | Warn only: rejected messages, tool-call errors/cancellations/panics/unknown tools, guard denies, per-step failures, 429/401 |
 | `error.log` | Error only: service-level failures (with stacktrace) |
 | `fatal.log` | Fatal only: fatal startup errors |
 | `gin.log` | per-request gin access logs |
@@ -135,7 +135,11 @@ Each message gets **exactly one entry line and one outcome line**: entry → `In
 
 ### 8.3 trace_id
 
-Key-path logs carry a trace_id: admin requests = client IP, QQ side = `group:<GroupID>` / `private:<QQ>`. Entry → outcome → model call of one session can be chained by trace_id; the console log page searches by it.
+Key-path logs carry a trace_id: admin requests = client IP, QQ side = `group:<GroupID>` / `private:<QQ>`. A session's entry → outcome → model call → AI tool calls can be chained by trace_id; each tool call also carries Eino's `tool_call_id` for reconciliation, and the console log page can search by trace_id.
+
+### 8.4 AI tool-call logs
+
+Each dispatched Eino tool call gets exactly one terminal Info/Warn record with its name, `tool_call_id`, outcome, latency, and `trace_id`; unknown tool names are logged and still fail. Generic logs omit raw arguments and returned content. `returned` means the tool endpoint returned normally, not that its business operation succeeded. Memory-write and group-action audits keep their existing business details; the middleware does not repeat their targets or payloads.
 
 ## 9. Architecture overview
 
