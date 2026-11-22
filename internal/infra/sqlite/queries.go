@@ -134,11 +134,6 @@ LEFT JOIN recall_indexed_sources i ON i.source_kind='summary' AND i.source_id=s.
 WHERE COALESCE(i.source_version, 0) < s.content_version
 ORDER BY 2, 1 LIMIT ?`
 
-	sqlGetRecallSourceVersion = `
-SELECT content_version FROM messages WHERE id=? AND ?='message'
-UNION ALL
-SELECT content_version FROM conversation_summary WHERE id=? AND ?='summary'`
-
 	sqlDeleteRecallFTSBySource = `DELETE FROM recall_fts WHERE rowid IN (
  SELECT id FROM recall_documents WHERE source_kind=? AND source_id=?)`
 	sqlDeleteRecallDocumentMessagesBySource = `DELETE FROM recall_document_messages WHERE document_id IN (
@@ -165,15 +160,6 @@ VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(document_id, model_key) DO UPDATE SET content_version=excluded.content_version, dimensions=excluded.dimensions, vector=excluded.vector
 WHERE EXISTS (SELECT 1 FROM recall_documents d WHERE d.id=excluded.document_id AND d.source_version=excluded.content_version)`
 
-	sqlRecallCoverage = `SELECT
- EXISTS(SELECT 1 FROM messages m LEFT JOIN recall_indexed_sources i ON i.source_kind='message' AND i.source_id=m.id WHERE m.session_key IN (SELECT value FROM json_each(?)) AND COALESCE(i.source_version,0)<m.content_version)
- OR EXISTS(SELECT 1 FROM conversation_summary s LEFT JOIN recall_indexed_sources i ON i.source_kind='summary' AND i.source_id=s.id WHERE s.chat_id IN (SELECT value FROM json_each(?)) AND COALESCE(i.source_version,0)<s.content_version),
- EXISTS(SELECT 1 FROM recall_documents d WHERE d.session_key IN (SELECT value FROM json_each(?)) AND (d.event_from IS NULL OR d.event_to IS NULL)),
- EXISTS(SELECT 1 FROM recall_documents d WHERE d.session_key IN (SELECT value FROM json_each(?))
- AND ((? IS NOT NULL AND d.event_from < ? AND d.event_to >= ?)
-		 OR (? IS NOT NULL AND d.event_from < ? AND d.event_to >= ?))
- AND d.event_from IS NOT NULL AND d.event_to IS NOT NULL)`
-
 	sqlRecallLexical = `SELECT d.id, d.session_key, d.source_kind, d.source_id, d.segment_no, d.source_version, d.content, d.event_from, d.event_to, bm25(recall_fts)
 FROM recall_fts JOIN recall_documents d ON d.id=recall_fts.rowid
 WHERE recall_fts MATCH ?
@@ -191,22 +177,6 @@ WHERE instr(d.content, ?) > 0
  AND ((d.source_kind='message' AND EXISTS(SELECT 1 FROM messages m WHERE m.id=d.source_id AND m.content_version=d.source_version))
    OR (d.source_kind='summary' AND EXISTS(SELECT 1 FROM conversation_summary s WHERE s.id=d.source_id AND s.content_version=d.source_version)))
 ORDER BY d.event_from DESC, d.id DESC LIMIT ?`
-
-	sqlRecallVector = `WITH scoped AS MATERIALIZED (
- SELECT d.id, d.session_key, d.source_kind, d.source_id, d.segment_no, d.source_version, d.content, d.event_from, d.event_to, v.vector
- FROM recall_documents d JOIN recall_vectors v ON v.document_id=d.id AND v.model_key=? AND v.content_version=d.source_version
- WHERE d.session_key IN (SELECT value FROM json_each(?))
-  AND ((? IS NULL AND ? IS NULL) OR (d.event_from IS NOT NULL AND d.event_to IS NOT NULL AND (? IS NULL OR d.event_from >= ?) AND (? IS NULL OR d.event_to < ?)))
-  AND ((d.source_kind='message' AND EXISTS(SELECT 1 FROM messages m WHERE m.id=d.source_id AND m.content_version=d.source_version))
-    OR (d.source_kind='summary' AND EXISTS(SELECT 1 FROM conversation_summary s WHERE s.id=d.source_id AND s.content_version=d.source_version)))
-), scored AS MATERIALIZED (
- SELECT id, session_key, source_kind, source_id, segment_no, source_version, content, event_from, event_to,
-        vec_distance_cosine(vector, ?) AS distance
- FROM scoped
-)
-SELECT id, session_key, source_kind, source_id, segment_no, source_version, content, event_from, event_to, distance
-FROM scored WHERE (? IS NULL OR 1.0-distance >= ?)
-ORDER BY distance LIMIT ?`
 
 	sqlRecallCoverageWithVectors = `SELECT
 	 EXISTS(SELECT 1 FROM messages m LEFT JOIN recall_indexed_sources i ON i.source_kind='message' AND i.source_id=m.id WHERE m.session_key IN (SELECT value FROM json_each(?)) AND COALESCE(i.source_version,0)<m.content_version)

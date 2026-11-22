@@ -86,22 +86,16 @@ func (s *Storage) ReplaceRecallDocuments(ctx context.Context, source entity.Reca
 	switch source.Kind {
 	case entity.RecallSourceMessage:
 		query = sqlRecallMessageVersion
-		if err := tx.QueryRowContext(ctx, query, source.ID, source.SessionKey).Scan(&current); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return false, nil
-			}
-			return false, err
-		}
 	case entity.RecallSourceSummary:
 		query = sqlRecallSummaryVersion
-		if err := tx.QueryRowContext(ctx, query, source.ID, source.SessionKey).Scan(&current); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return false, nil
-			}
-			return false, err
-		}
 	default:
 		return false, fmt.Errorf("未知召回来源类型 %q", source.Kind)
+	}
+	if err := tx.QueryRowContext(ctx, query, source.ID, source.SessionKey).Scan(&current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
 	}
 	if current != source.Version {
 		return false, nil
@@ -213,7 +207,7 @@ func (s *Storage) SearchRecallLexical(ctx context.Context, scope entity.RecallSc
 	}
 	var rows *sql.Rows
 	match := ftsMatchQuery(query.Text)
-	if utf8.RuneCountInString(needle) < 3 || match == "" {
+	if utf8.RuneCountInString(needle) < ftsQueryTokenLength || match == "" {
 		rows, err = s.db.QueryContext(ctx, sqlRecallSubstring,
 			needle, string(scopeJSON), query.From, query.To,
 			query.From, query.From, query.To, query.To, limit)
@@ -306,12 +300,7 @@ func (s *Storage) loadMessageContext(ctx context.Context, doc entity.RecallDocum
 		return nil, err
 	}
 	maxMessages := query.MaxMessages
-	if maxMessages < 1 {
-		maxMessages = 1
-	}
-	if maxMessages > 12 {
-		maxMessages = 12
-	}
+	maxMessages = max(1, min(maxMessages, 12))
 	beforeN := (maxMessages - 1) / 2
 	afterN := maxMessages - 1 - beforeN
 	before, err := s.queryRecallNeighbors(ctx, sqlRecallBefore, doc.SessionKey, anchorTimestamp, doc.SourceID, query, beforeN)
@@ -356,21 +345,18 @@ func (s *Storage) queryRecallNeighbors(ctx context.Context, querySQL, sessionKey
 		if err := json.Unmarshal([]byte(parts), &content); err != nil {
 			return nil, err
 		}
-		msg.Text = renderRecallMessageText(msg.UserID, parts, "group")
-		if contentText := renderParts(content); contentText != "" {
-			if msg.UserID == "" {
-				msg.Text = contentText
-			} else {
-				msg.Text = "[" + msg.UserID + "]: " + contentText
-			}
-		}
+		msg.Text = renderRecallParts(msg.UserID, "group", content)
 		out = append(out, msg)
 	}
 	return out, rows.Err()
 }
 
-func renderParts(parts []entity.ContentPart) string {
-	return (entity.Message{Parts: parts}).ForLLM()
+func renderRecallParts(userID, messageType string, parts []entity.ContentPart) string {
+	text := (entity.Message{Parts: parts}).ForLLM()
+	if messageType == "group" && userID != "" {
+		return "[" + userID + "]: " + text
+	}
+	return text
 }
 
 func renderRecallMessageText(userID, partsJSON, messageType string) string {
@@ -378,11 +364,7 @@ func renderRecallMessageText(userID, partsJSON, messageType string) string {
 	if err := json.Unmarshal([]byte(partsJSON), &parts); err != nil {
 		return "[历史消息内容无法读取]"
 	}
-	text := renderParts(parts)
-	if messageType == "group" && userID != "" {
-		return "[" + userID + "]: " + text
-	}
-	return text
+	return renderRecallParts(userID, messageType, parts)
 }
 
 func scanRecallCandidates(rows *sql.Rows) ([]entity.RecallCandidate, error) {
@@ -403,13 +385,15 @@ func scanRecallCandidates(rows *sql.Rows) ([]entity.RecallCandidate, error) {
 	return out, rows.Err()
 }
 
+const ftsQueryTokenLength = 3
+
 func ftsMatchQuery(query string) string {
 	var terms []string
 	var current []rune
 	flush := func() {
-		if len(current) >= 3 {
-			for n := 0; n+3 <= len(current) && len(terms) < 16; n++ {
-				terms = append(terms, `"`+string(current[n:n+3])+`"`)
+		if len(current) >= ftsQueryTokenLength {
+			for n := 0; n+ftsQueryTokenLength <= len(current) && len(terms) < 16; n++ {
+				terms = append(terms, `"`+string(current[n:n+ftsQueryTokenLength])+`"`)
 			}
 		}
 		current = current[:0]
@@ -446,9 +430,3 @@ func validFloat32Vector(values []float32) bool {
 	}
 	return norm > 0
 }
-
-// ftsQueryTokenLength is kept as a compile-time guard for trigram query behavior.
-const ftsQueryTokenLength = 3
-
-var _ = ftsQueryTokenLength
-var _ = utf8.RuneCountInString

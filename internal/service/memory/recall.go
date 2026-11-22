@@ -161,7 +161,7 @@ func (s *RecallService) resolveScope(ctx context.Context, session entity.Session
 			return entity.RecallScope{SessionKeys: []string{session.GroupID}}, true, nil
 		}
 		partial := len(members) > recallMaxScopeMembers
-		if len(members) > recallMaxScopeMembers {
+		if partial {
 			members = members[:recallMaxScopeMembers]
 		}
 		for _, uid := range members {
@@ -257,29 +257,19 @@ func reciprocalRankFusion(lexical, vectors []entity.RecallCandidate) []entity.Re
 		score     float64
 	}
 	byID := make(map[int64]*ranked, len(lexical)+len(vectors))
-	for i, c := range lexical {
-		rank := i + 1
-		if c.Rank > 0 {
-			rank = c.Rank
+	for _, candidates := range [2][]entity.RecallCandidate{lexical, vectors} {
+		for i, c := range candidates {
+			rank := i + 1
+			if c.Rank > 0 {
+				rank = c.Rank
+			}
+			r := byID[c.Document.ID]
+			if r == nil {
+				r = &ranked{candidate: c}
+				byID[c.Document.ID] = r
+			}
+			r.score += 1 / (rrfConstant + float64(rank))
 		}
-		r := byID[c.Document.ID]
-		if r == nil {
-			r = &ranked{candidate: c}
-			byID[c.Document.ID] = r
-		}
-		r.score += 1 / (rrfConstant + float64(rank))
-	}
-	for i, c := range vectors {
-		rank := i + 1
-		if c.Rank > 0 {
-			rank = c.Rank
-		}
-		r := byID[c.Document.ID]
-		if r == nil {
-			r = &ranked{candidate: c}
-			byID[c.Document.ID] = r
-		}
-		r.score += 1 / (rrfConstant + float64(rank))
 	}
 	all := make([]*ranked, 0, len(byID))
 	for _, r := range byID {
@@ -501,7 +491,7 @@ func buildRecallDocuments(source entity.RecallSource) []entity.RecallDocument {
 			text = "[" + source.Message.UserID + "]: " + text
 		}
 		if source.Message.Timestamp > 0 {
-			from, to = int64Pointer(source.Message.Timestamp), int64Pointer(source.Message.Timestamp)
+			from, to = new(source.Message.Timestamp), new(source.Message.Timestamp)
 		}
 	case entity.RecallSourceSummary:
 		if source.Summary == nil || source.SessionKey == "" {
@@ -526,10 +516,7 @@ func buildRecallDocuments(source entity.RecallSource) []entity.RecallDocument {
 	runes := []rune(text)
 	var docs []entity.RecallDocument
 	for start, segment := 0, 0; start < len(runes); segment++ {
-		end := start + recallDocumentRunes
-		if end > len(runes) {
-			end = len(runes)
-		}
+		end := min(start+recallDocumentRunes, len(runes))
 		body := string(runes[start:end])
 		hash := sha256.Sum256([]byte(body))
 		docs = append(docs, entity.RecallDocument{
@@ -541,42 +528,4 @@ func buildRecallDocuments(source entity.RecallSource) []entity.RecallDocument {
 		start = end
 	}
 	return docs
-}
-
-func int64Pointer(v int64) *int64 { return &v }
-
-// FormatRecallTime 是工具输出时间格式化用的纯函数。
-func FormatRecallTime(unix int64) string {
-	return time.Unix(unix, 0).UTC().Format(time.RFC3339)
-}
-
-// ParseRecallTime 将 RFC3339 时间解析为 Unix 秒。
-func ParseRecallTime(value string) (*int64, error) {
-	if strings.TrimSpace(value) == "" {
-		return nil, nil
-	}
-	t, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		return nil, fmt.Errorf("时间必须使用 RFC3339 格式（例如 2026-06-01T00:00:00+08:00）: %w", err)
-	}
-	u := t.Unix()
-	if t.Nanosecond() > 0 {
-		u++ // 存储时间戳精度为秒，边界向上取整避免误纳入更早的事件。
-	}
-	return &u, nil
-}
-
-// ParseRecallLimit 是用于日志和测试的安全整数归一化帮助函数。
-func ParseRecallLimit(value string, fallback, max int) (int, error) {
-	if strings.TrimSpace(value) == "" {
-		return fallback, nil
-	}
-	n, err := strconv.Atoi(value)
-	if err != nil || n < 1 {
-		return 0, errors.New("数量必须为正整数")
-	}
-	if n > max {
-		n = max
-	}
-	return n, nil
 }

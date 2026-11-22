@@ -160,3 +160,15 @@ func TestBuildRecallDocumentsKeepsUnknownMessageTimeUnknown(t *testing.T) {
 		t.Fatalf("时间戳无效的消息不能伪装为 epoch 事件: %+v", docs)
 	}
 }
+
+func TestClampRecallQueryBounds(t *testing.T) {
+	defaults := clampRecallQuery(entity.RecallQuery{})
+	if defaults.Limit != recallDefaultLimit || defaults.MaxMessages != recallDefaultMaxMessages || defaults.Candidates != recallDefaultCandidates {
+		t.Fatalf("查询默认值错误: %+v", defaults)
+	}
+
+	bounded := clampRecallQuery(entity.RecallQuery{Limit: 99, MaxMessages: 99, Candidates: 999})
+	if bounded.Limit != recallMaxLimit || bounded.MaxMessages != recallHardMaxMessages || bounded.Candidates != recallMaxCandidates {
+		t.Fatalf("查询上限错误: %+v", bounded)
+	}
+}

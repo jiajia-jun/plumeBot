@@ -11,8 +11,8 @@ func TestSummaryAppendAssignsSeq(t *testing.T) {
 	store := &fakeStorage{}
 	ss := NewSummaryStore(store)
 
-	s1 := ss.Append(context.Background(), "g1", "第一段", nil, nil)
-	s2 := ss.Append(context.Background(), "g1", "第二段", nil, nil)
+	s1 := ss.Append(context.Background(), "g1", "第一段", nil, nil, nil, nil)
+	s2 := ss.Append(context.Background(), "g1", "第二段", nil, nil, nil, nil)
 	if s1.Seq != 1 || s2.Seq != 2 {
 		t.Errorf("seq 应递增, 实际 %d, %d", s1.Seq, s2.Seq)
 	}
@@ -28,8 +28,8 @@ func TestSummaryAppendAssignsSeq(t *testing.T) {
 
 func TestSummaryStorePerChatIsolation(t *testing.T) {
 	ss := NewSummaryStore(&fakeStorage{})
-	ss.Append(context.Background(), "g1", "g1 内容", nil, nil)
-	ss.Append(context.Background(), "g2", "g2 内容", nil, nil)
+	ss.Append(context.Background(), "g1", "g1 内容", nil, nil, nil, nil)
+	ss.Append(context.Background(), "g2", "g2 内容", nil, nil, nil, nil)
 
 	g1 := ss.GetAll(context.Background(), "g1")
 	g2 := ss.GetAll(context.Background(), "g2")
@@ -41,10 +41,10 @@ func TestSummaryStorePerChatIsolation(t *testing.T) {
 func TestSummaryReplaceWithFusedArchivesOld(t *testing.T) {
 	store := &fakeStorage{}
 	ss := NewSummaryStore(store)
-	ss.Append(context.Background(), "g1", "a", nil, nil)
-	ss.Append(context.Background(), "g1", "b", nil, nil)
+	ss.Append(context.Background(), "g1", "a", nil, nil, nil, nil)
+	ss.Append(context.Background(), "g1", "b", nil, nil, nil, nil)
 
-	fused := ss.ReplaceWithFused(context.Background(), "g1", "融合", []string{"k"}, []string{"d"})
+	fused := ss.ReplaceWithFused(context.Background(), "g1", "融合", []string{"k"}, []string{"d"}, nil, nil)
 	if fused.Seq != 3 || fused.Text != "融合" {
 		t.Errorf("融合摘要 seq 应续号=3, 实际 %+v", fused)
 	}
@@ -60,8 +60,8 @@ func TestSummaryReplaceWithFusedArchivesOld(t *testing.T) {
 func TestSummaryEvictOldestArchives(t *testing.T) {
 	store := &fakeStorage{}
 	ss := NewSummaryStore(store)
-	ss.Append(context.Background(), "g1", "a", nil, nil)
-	ss.Append(context.Background(), "g1", "b", nil, nil)
+	ss.Append(context.Background(), "g1", "a", nil, nil, nil, nil)
+	ss.Append(context.Background(), "g1", "b", nil, nil, nil, nil)
 
 	evicted := ss.EvictOldest(context.Background(), "g1")
 	if evicted.Text != "a" {
@@ -91,7 +91,7 @@ func TestSummaryStoreSeedsFromArchive(t *testing.T) {
 	}
 
 	// 重启后的新摘要应续号到最大 seq+1，不重复。
-	appended := ss.Append(context.Background(), "g1", "重启后", nil, nil)
+	appended := ss.Append(context.Background(), "g1", "重启后", nil, nil, nil, nil)
 	if appended.Seq != 5 {
 		t.Errorf("重启后 seq 应从 5 续号, 实际 %d", appended.Seq)
 	}

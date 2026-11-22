@@ -179,6 +179,7 @@
 | B-051 | ✅ 已完成 | 管理后端契约分层合规（接口在 domain / 通信结构体在 entity / json 归 web dto） | service/admin 层架构审查 | 已完成 | **已完成**：① `domain.Admin` 接口（全部管理方法，entity 签名）+ 消费侧接口 `domain.SessionWindowReader`/`domain.GroupProfileInvalidator` 上移定义在 domain 层，`service/admin.Service` 实现接口，`handler/web` 8 个 handler 与 `NewRouter` 依赖 `domain.Admin` 而非具体类型（与其他 service→domain 接口一致）；② 通信/出参结构体 `entity.AuthResult`/`entity.SessionOverview`/`entity.SessionMessage` 入 `domain/entity`（纯结构、无 json tag）。**json 职责收口**：`entity.GroupConfig`/`entity.LogEntry`/`entity.LogPage` 的 json tag 一并移除，出参形态改由 `response.GroupConfig`（13 字段不再嵌入 entity，新增 `toGroupConfigDTO` 映射）/`response.LogEntry`/`response.LogPage` 自持（新增 `toLogEntryDTOs` 映射）——wire 键名与顺序逐一实测零变化（前端 index.html 无改动）；**唯一豁免 = `entity.ContentPart`**：`messages.parts` 列为 JSON 文本、由 `infra/sqlite` 直接 Marshal/Unmarshal，其 tag 是持久化形态约定（非 web 出参形态），已在文件头与 CLAUDE.md §5.6 标明判据「有无非 web 的序列化消费方」。wire 契约零变化（HTTP 路由/字段/包络/业务码不变），`go build/vet/test` + `-race` 全绿 |
 | B-052 | 后置 | 旧私聊 bot 回复的会话归属未知 | P6-005 数据迁移边界 | 有外部可靠来源可补归属时 | 004 迁移不猜测旧私聊 `self:` 回复属于哪个用户，保留空 `session_key` 且不纳入召回；只有补到可信会话映射后才能安全回填，禁止按 bot `user_id` 扩大到所有私聊查询 |
 | B-053 | 后置 | embedding 同名模型权重替换不可自动识别 | P6-005 召回模型指纹边界 | 服务端静默替换模型版本时 | `model_key` 基于 provider/base_url/model 与向量维数；服务端在同名且同维数下替换权重无法从响应判断。需要重建时使用新的配置 model 标识生成独立向量空间；只重建派生向量，不删除原始消息/摘要 |
+| B-054 | 后置 | 召回派生元数据清理或明确用途 | P6-005 实现审查 | 004 迁移发布前确认 | `recall_documents.content_hash` 当前只计算并写入、没有读取端；`recall_document_messages` 当前只建表/维护、没有读取端。暂不删改已版本化迁移或丢弃已有派生数据；若确认无消费者，应新增迁移清理并同步架构文档；若保留，需明确实际消费路径。 |
 
 ---
 

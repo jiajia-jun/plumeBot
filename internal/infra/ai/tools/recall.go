@@ -15,15 +15,7 @@ import (
 	"plumebot/internal/domain/entity"
 )
 
-const (
-	recallToolDefaultLimit      = 5
-	recallToolMaxLimit          = 10
-	recallToolDefaultMessages   = 8
-	recallToolMaxMessages       = 12
-	recallToolDefaultCandidates = 30
-	recallToolMaxCandidates     = 100
-	recallToolMaxQueryRunes     = 256
-)
+const recallToolMaxQueryRunes = 256
 
 type recallArgs struct {
 	Query         string   `json:"query" jsonschema:"required,description=要查找的历史内容，例如之前提到的地点或约定；最多 256 个字符"`
@@ -90,9 +82,9 @@ func (t *RecallTool) run(ctx context.Context, args recallArgs) (string, error) {
 		return "历史召回未执行：缺少当前会话身份，拒绝跨会话搜索。", nil
 	}
 	query := entity.RecallQuery{
-		Text: queryText, From: from, To: to, Limit: boundedInt(args.Limit, recallToolDefaultLimit, recallToolMaxLimit),
-		MaxMessages:   boundedInt(args.MaxMessages, recallToolDefaultMessages, recallToolMaxMessages),
-		Candidates:    boundedInt(args.Candidates, recallToolDefaultCandidates, recallToolMaxCandidates),
+		Text: queryText, From: from, To: to, Limit: args.Limit,
+		MaxMessages:   args.MaxMessages,
+		Candidates:    args.Candidates,
 		MinSimilarity: args.MinSimilarity,
 	}
 	result, err := t.recaller.Recall(ctx, session, query)
@@ -101,16 +93,6 @@ func (t *RecallTool) run(ctx context.Context, args recallArgs) (string, error) {
 		return "历史召回暂不可用：" + err.Error(), nil
 	}
 	return formatRecallResult(result), nil
-}
-
-func boundedInt(value, fallback, maximum int) int {
-	if value <= 0 {
-		return fallback
-	}
-	if value > maximum {
-		return maximum
-	}
-	return value
 }
 
 func parseRecallTime(value string) (*int64, error) {

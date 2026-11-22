@@ -26,14 +26,14 @@ func (s *recallStub) Recall(_ context.Context, session entity.Session, query ent
 	return s.result, s.err
 }
 
-func TestRecallToolValidatesAndBoundsInput(t *testing.T) {
+func TestRecallToolValidatesAndPassesInput(t *testing.T) {
 	stub := &recallStub{result: entity.RecallResult{}}
 	tool := NewRecallTool(stub)
 	ctx := entity.WithSession(context.Background(), entity.Session{GroupID: "g1", UserID: "123"})
 	minSimilarity := 0.4
 	got, err := tool.run(ctx, recallArgs{
 		Query: "  上次说的计划  ", FromTime: "2026-06-01T00:00:00+08:00", ToTime: "2026-06-02T00:00:00+08:00",
-		Limit: 99, MaxMessages: 99, Candidates: 999, MinSimilarity: &minSimilarity,
+		Limit: 7, MaxMessages: 9, Candidates: 80, MinSimilarity: &minSimilarity,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -41,10 +41,10 @@ func TestRecallToolValidatesAndBoundsInput(t *testing.T) {
 	if !stub.called {
 		t.Fatal("合法输入没有触发召回")
 	}
-	if stub.session.GroupID != "g1" || stub.query.Text != "上次说的计划" || stub.query.Limit != recallToolMaxLimit ||
-		stub.query.MaxMessages != recallToolMaxMessages || stub.query.Candidates != recallToolMaxCandidates ||
+	if stub.session.GroupID != "g1" || stub.query.Text != "上次说的计划" || stub.query.Limit != 7 ||
+		stub.query.MaxMessages != 9 || stub.query.Candidates != 80 ||
 		stub.query.MinSimilarity == nil || *stub.query.MinSimilarity != minSimilarity {
-		t.Fatalf("参数未被安全归一: session=%+v query=%+v", stub.session, stub.query)
+		t.Fatalf("参数未按原样传递: session=%+v query=%+v", stub.session, stub.query)
 	}
 	if got == "" {
 		t.Fatal("空结果应给出清晰状态文本")

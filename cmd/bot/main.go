@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -89,7 +90,7 @@ func main() {
 
 	// 记忆召回始终注册，但仅在 recall_memory 已启用时启动后台索引器。
 	// embedding_model 留空时索引/查询仍可用 FTS 关键词，不发起外部向量请求。
-	recallEnabled := isToolEnabled(cfg.Tools.Enabled, "recall_memory")
+	recallEnabled := slices.Contains(cfg.Tools.Enabled, "recall_memory")
 	var recallEmbedder domain.Embedder
 	if recallEnabled && cfg.LLM.EmbeddingModel != "" {
 		if entry, ok := cfg.LLM.EmbeddingEntry(); !ok {
@@ -392,16 +393,6 @@ func newWebServer(addr string) *http.Server {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
 	return &http.Server{Addr: addr, Handler: r}
-}
-
-// isToolEnabled 检查工具启用列表，重复项不影响判断。
-func isToolEnabled(enabled []string, name string) bool {
-	for _, item := range enabled {
-		if item == name {
-			return true
-		}
-	}
-	return false
 }
 
 // entryProvider 返回条目实际生效的 provider 名（与 Registry.NewAgent 的兜底一致）。
