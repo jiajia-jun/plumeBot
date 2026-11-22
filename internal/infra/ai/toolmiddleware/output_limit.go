@@ -78,16 +78,10 @@ func NewToolOutputLimiter(cfg ToolOutputLimitConfig) compose.ToolMiddleware {
 	if cfg.PerCallChars <= 0 {
 		cfg.PerCallChars = defaultToolOutputChars
 	}
-	if cfg.TotalChars <= 0 {
-		cfg.TotalChars = defaultToolTotalOutputChars
-	}
 	if cfg.MaxChars <= 0 || cfg.MaxChars > hardToolOutputChars {
 		cfg.MaxChars = hardToolOutputChars
 	}
-	perCall := cfg.PerCallChars
-	if perCall > cfg.MaxChars {
-		perCall = cfg.MaxChars
-	}
+	perCall := min(cfg.PerCallChars, cfg.MaxChars)
 	reserveFor := func(ctx context.Context, args string) (*toolOutputBudget, int, int, bool, error) {
 		limit := perCall
 		if requested := maxCharsFromArguments(args); requested > 0 && requested < limit {
@@ -122,21 +116,15 @@ func NewToolOutputLimiter(cfg ToolOutputLimitConfig) compose.ToolMiddleware {
 				}
 				output, err := next(ctx, input)
 				if err != nil {
-					if budget != nil {
-						budget.refund(reserved, 0)
-					}
+					budget.refund(reserved, 0)
 					return nil, err
 				}
 				if output == nil {
-					if budget != nil {
-						budget.refund(reserved, 0)
-					}
+					budget.refund(reserved, 0)
 					return &compose.ToolOutput{}, nil
 				}
 				output.Result, _ = clampToolOutput(output.Result, limit)
-				if budget != nil {
-					budget.refund(reserved, utf8.RuneCountInString(output.Result))
-				}
+				budget.refund(reserved, utf8.RuneCountInString(output.Result))
 				return output, nil
 			}
 		},
@@ -151,30 +139,22 @@ func NewToolOutputLimiter(cfg ToolOutputLimitConfig) compose.ToolMiddleware {
 				}
 				output, err := next(ctx, input)
 				if err != nil {
-					if budget != nil {
-						budget.refund(reserved, 0)
-					}
+					budget.refund(reserved, 0)
 					return nil, err
 				}
 				if output == nil || output.Result == nil {
-					if budget != nil {
-						budget.refund(reserved, 0)
-					}
+					budget.refund(reserved, 0)
 					return &compose.StreamToolOutput{Result: schema.StreamReaderFromArray([]string{""})}, nil
 				}
 				text, truncated, readErr := collectTextStream(output.Result, limit)
 				if readErr != nil {
-					if budget != nil {
-						budget.refund(reserved, 0)
-					}
+					budget.refund(reserved, 0)
 					return nil, readErr
 				}
 				if truncated {
 					text = truncateStreamOutput(text, limit)
 				}
-				if budget != nil {
-					budget.refund(reserved, utf8.RuneCountInString(text))
-				}
+				budget.refund(reserved, utf8.RuneCountInString(text))
 				return &compose.StreamToolOutput{Result: schema.StreamReaderFromArray([]string{text})}, nil
 			}
 		},
@@ -189,15 +169,11 @@ func NewToolOutputLimiter(cfg ToolOutputLimitConfig) compose.ToolMiddleware {
 				}
 				output, err := next(ctx, input)
 				if err != nil {
-					if budget != nil {
-						budget.refund(reserved, 0)
-					}
+					budget.refund(reserved, 0)
 					return nil, err
 				}
 				if output == nil || output.Result == nil {
-					if budget != nil {
-						budget.refund(reserved, 0)
-					}
+					budget.refund(reserved, 0)
 					return output, nil
 				}
 				used, tooLarge := limitToolResult(output.Result, limit)
@@ -205,9 +181,7 @@ func NewToolOutputLimiter(cfg ToolOutputLimitConfig) compose.ToolMiddleware {
 					output.Result = textToolResult(truncatedMessage)
 					used = utf8.RuneCountInString(truncatedMessage)
 				}
-				if budget != nil {
-					budget.refund(reserved, used)
-				}
+				budget.refund(reserved, used)
 				return output, nil
 			}
 		},
@@ -222,31 +196,23 @@ func NewToolOutputLimiter(cfg ToolOutputLimitConfig) compose.ToolMiddleware {
 				}
 				output, err := next(ctx, input)
 				if err != nil {
-					if budget != nil {
-						budget.refund(reserved, 0)
-					}
+					budget.refund(reserved, 0)
 					return nil, err
 				}
 				if output == nil || output.Result == nil {
-					if budget != nil {
-						budget.refund(reserved, 0)
-					}
+					budget.refund(reserved, 0)
 					return &compose.EnhancedStreamableToolOutput{Result: schema.StreamReaderFromArray([]*schema.ToolResult{textToolResult("")})}, nil
 				}
 				result, used, tooLarge, readErr := collectEnhancedStream(output.Result, limit)
 				if readErr != nil {
-					if budget != nil {
-						budget.refund(reserved, 0)
-					}
+					budget.refund(reserved, 0)
 					return nil, readErr
 				}
 				if tooLarge {
 					result = textToolResult(truncatedMessage)
 					used = utf8.RuneCountInString(truncatedMessage)
 				}
-				if budget != nil {
-					budget.refund(reserved, used)
-				}
+				budget.refund(reserved, used)
 				return &compose.EnhancedStreamableToolOutput{Result: schema.StreamReaderFromArray([]*schema.ToolResult{result})}, nil
 			}
 		},
@@ -321,10 +287,7 @@ func truncatePlainText(text string, limit int) string {
 	if len(marker) >= limit {
 		return string(marker[:limit])
 	}
-	keep := limit - len(marker)
-	if keep > len(runes) {
-		keep = len(runes)
-	}
+	keep := min(limit-len(marker), len(runes))
 	return string(runes[:keep]) + truncatedMessage
 }
 

@@ -12,7 +12,7 @@ if /i not "%WIN_ANS%"=="y" goto skip_windows
 
 echo === plumebot windows build ===
 set GOOS=windows
-go build -trimpath -ldflags "-s -w" -o bot.exe ./cmd/bot/
+go build -trimpath -ldflags "-s -w" -o ./builds/bot.exe ./cmd/bot/
 if errorlevel 1 (
     echo [FAILED] build bot.exe
     exit /b 1
@@ -30,7 +30,7 @@ if /i not "%LINUX_ANS%"=="y" goto skip_linux
 
 echo === plumebot linux build ===
 set GOOS=linux
-go build -trimpath -ldflags "-s -w" -o bot-linux ./cmd/bot/
+go build -trimpath -ldflags "-s -w" -o ./builds/bot-linux ./cmd/bot/
 if errorlevel 1 (
     echo [FAILED] build bot-linux
     exit /b 1
